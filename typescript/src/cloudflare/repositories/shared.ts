@@ -100,7 +100,7 @@ export async function fetchDefinitionBy(
 \tdefault_options,
 \tcreated_at,
 \tupdated_at
-FROM job_definitions
+FROM kumofire_job_definitions
 WHERE ${whereClause}
 LIMIT 1`)
 		.bind(...values)
@@ -130,7 +130,7 @@ export async function fetchJobRunBy(
 \tstarted_at,
 \tfinished_at,
 \tlast_error
-FROM job_runs
+FROM kumofire_job_runs
 WHERE ${whereClause}
 LIMIT 1`)
 		.bind(...values)

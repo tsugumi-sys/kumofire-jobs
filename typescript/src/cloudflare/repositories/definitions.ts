@@ -6,7 +6,7 @@ export function createDefinitionRepository(db: D1Database) {
 	return {
 		async create(definition: JobDefinition): Promise<JobDefinition> {
 			const insertResult = await db
-				.prepare(`INSERT INTO job_definitions (
+				.prepare(`INSERT INTO kumofire_job_definitions (
 \tid,
 \tname,
 \thandler,

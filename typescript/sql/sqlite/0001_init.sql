@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS job_definitions (
+CREATE TABLE IF NOT EXISTS kumofire_job_definitions (
 	id TEXT PRIMARY KEY,
 	name TEXT NOT NULL UNIQUE,
 	handler TEXT NOT NULL,
@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS job_definitions (
 	updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS job_runs (
+CREATE TABLE IF NOT EXISTS kumofire_job_runs (
 	id TEXT PRIMARY KEY,
 	job_id TEXT NOT NULL,
 	job_name TEXT NOT NULL,
@@ -23,23 +23,28 @@ CREATE TABLE IF NOT EXISTS job_runs (
 	started_at TEXT,
 	finished_at TEXT,
 	last_error TEXT,
-	FOREIGN KEY (job_id) REFERENCES job_definitions(id)
+	FOREIGN KEY (job_id) REFERENCES kumofire_job_definitions(id)
 );
 
-CREATE INDEX IF NOT EXISTS job_runs_status_next_run_at_idx
-	ON job_runs (status, next_run_at);
+CREATE INDEX IF NOT EXISTS kumofire_job_runs_status_next_run_at_idx
+	ON kumofire_job_runs (status, next_run_at);
 
-CREATE UNIQUE INDEX IF NOT EXISTS job_runs_dedupe_key_idx
-	ON job_runs (dedupe_key)
+CREATE UNIQUE INDEX IF NOT EXISTS kumofire_job_runs_dedupe_key_idx
+	ON kumofire_job_runs (dedupe_key)
 	WHERE dedupe_key IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS job_locks (
+CREATE TABLE IF NOT EXISTS kumofire_job_locks (
 	job_run_id TEXT PRIMARY KEY,
 	lease_until TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS schema_version (
+CREATE TABLE IF NOT EXISTS kumofire_schema_version (
 	version INTEGER PRIMARY KEY,
 	updated_at TEXT NOT NULL
 );
+
+INSERT INTO kumofire_schema_version (version, updated_at)
+VALUES (1, '1970-01-01T00:00:00.000Z')
+ON CONFLICT(version) DO UPDATE SET
+	updated_at = excluded.updated_at;

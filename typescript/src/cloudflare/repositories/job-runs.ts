@@ -13,7 +13,7 @@ export function createJobRunRepository(db: D1Database) {
 	return {
 		async create(jobRun: JobRun & { id: string }): Promise<JobRun> {
 			const result = await db
-				.prepare(`INSERT INTO job_runs (
+				.prepare(`INSERT INTO kumofire_job_runs (
 \tid,
 \tjob_id,
 \tjob_name,
@@ -79,7 +79,7 @@ export function createJobRunRepository(db: D1Database) {
 \tstarted_at,
 \tfinished_at,
 \tlast_error
-FROM job_runs
+FROM kumofire_job_runs
 WHERE status = 'scheduled'
 \tAND next_run_at IS NOT NULL
 \tAND next_run_at <= ?
@@ -96,7 +96,7 @@ LIMIT ?`)
 			now: Date;
 		}): Promise<JobRun | null> {
 			const result = await db
-				.prepare(`UPDATE job_runs
+				.prepare(`UPDATE kumofire_job_runs
 SET status = 'queued',
 \tupdated_at = ?
 WHERE id = ?
@@ -118,7 +118,7 @@ WHERE id = ?
 		}): Promise<JobRun | null> {
 			const timestamp = params.now.toISOString();
 			const result = await db
-				.prepare(`UPDATE job_runs
+				.prepare(`UPDATE kumofire_job_runs
 SET status = 'running',
 \tstarted_at = ?,
 \tupdated_at = ?
@@ -141,7 +141,7 @@ WHERE id = ?
 		}): Promise<JobRun | null> {
 			const timestamp = params.now.toISOString();
 			const result = await db
-				.prepare(`UPDATE job_runs
+				.prepare(`UPDATE kumofire_job_runs
 SET status = 'succeeded',
 \tfinished_at = ?,
 \tupdated_at = ?,
@@ -166,7 +166,7 @@ WHERE id = ?
 			error: string;
 		}): Promise<JobRun | null> {
 			const result = await db
-				.prepare(`UPDATE job_runs
+				.prepare(`UPDATE kumofire_job_runs
 SET status = 'scheduled',
 \tattempt = attempt + 1,
 \tnext_run_at = ?,
@@ -197,7 +197,7 @@ WHERE id = ?
 		}): Promise<JobRun | null> {
 			const timestamp = params.now.toISOString();
 			const result = await db
-				.prepare(`UPDATE job_runs
+				.prepare(`UPDATE kumofire_job_runs
 SET status = 'failed',
 \tattempt = attempt + 1,
 \tfinished_at = ?,

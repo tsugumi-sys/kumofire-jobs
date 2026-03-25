@@ -5,7 +5,7 @@ export function createSchemaVersionRepository(db: D1Database) {
 		async getSchemaVersion(): Promise<number> {
 			const row = await db
 				.prepare(
-					"SELECT version FROM schema_version ORDER BY version DESC LIMIT 1",
+					"SELECT version FROM kumofire_schema_version ORDER BY version DESC LIMIT 1",
 				)
 				.first<{ version: number }>();
 

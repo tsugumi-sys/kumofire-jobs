@@ -129,11 +129,13 @@ class FakeD1Database implements D1Database {
 	first<T>(query: string, values: unknown[]): T | null {
 		const normalized = normalizeSql(query);
 
-		if (normalized.startsWith("SELECT version FROM schema_version")) {
+		if (normalized.startsWith("SELECT version FROM kumofire_schema_version")) {
 			return { version: this.schemaVersion } as T;
 		}
 
-		if (normalized.includes("FROM job_definitions WHERE id = ? LIMIT 1")) {
+		if (
+			normalized.includes("FROM kumofire_job_definitions WHERE id = ? LIMIT 1")
+		) {
 			const definitionId = values[0];
 			if (typeof definitionId !== "string") {
 				return null;
@@ -142,7 +144,11 @@ class FakeD1Database implements D1Database {
 			return (this.definitions.get(definitionId) ?? null) as T | null;
 		}
 
-		if (normalized.includes("FROM job_definitions WHERE name = ? LIMIT 1")) {
+		if (
+			normalized.includes(
+				"FROM kumofire_job_definitions WHERE name = ? LIMIT 1",
+			)
+		) {
 			const jobName = values[0];
 			if (typeof jobName !== "string") {
 				return null;
@@ -156,7 +162,7 @@ class FakeD1Database implements D1Database {
 			return (this.definitions.get(definitionId) ?? null) as T | null;
 		}
 
-		if (normalized.includes("FROM job_runs WHERE id = ? LIMIT 1")) {
+		if (normalized.includes("FROM kumofire_job_runs WHERE id = ? LIMIT 1")) {
 			const jobRunId = values[0];
 			if (typeof jobRunId !== "string") {
 				return null;
@@ -165,7 +171,9 @@ class FakeD1Database implements D1Database {
 			return (this.jobRuns.get(jobRunId) ?? null) as T | null;
 		}
 
-		if (normalized.includes("FROM job_runs WHERE dedupe_key = ? LIMIT 1")) {
+		if (
+			normalized.includes("FROM kumofire_job_runs WHERE dedupe_key = ? LIMIT 1")
+		) {
 			const dedupeKey = values[0];
 			if (typeof dedupeKey !== "string") {
 				return null;
@@ -185,7 +193,9 @@ class FakeD1Database implements D1Database {
 
 	allRows<T>(query: string, values: unknown[]): T[] {
 		const normalized = normalizeSql(query);
-		if (!normalized.includes("FROM job_runs WHERE status = 'scheduled'")) {
+		if (
+			!normalized.includes("FROM kumofire_job_runs WHERE status = 'scheduled'")
+		) {
 			throw new Error(`Unsupported all() query: ${normalized}`);
 		}
 
@@ -221,7 +231,7 @@ class FakeD1Database implements D1Database {
 	): D1RunResult<T> {
 		const normalized = normalizeSql(query);
 
-		if (normalized.startsWith("INSERT INTO job_definitions")) {
+		if (normalized.startsWith("INSERT INTO kumofire_job_definitions")) {
 			const [
 				id,
 				name,
@@ -254,7 +264,7 @@ class FakeD1Database implements D1Database {
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
-		if (normalized.startsWith("INSERT INTO job_runs")) {
+		if (normalized.startsWith("INSERT INTO kumofire_job_runs")) {
 			const [
 				id,
 				jobId,
@@ -292,7 +302,7 @@ class FakeD1Database implements D1Database {
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
-		if (normalized.startsWith("INSERT INTO job_locks")) {
+		if (normalized.startsWith("INSERT INTO kumofire_job_locks")) {
 			const [jobRunId, leaseUntil, , now] = values;
 			const existing = this.locks.get(String(jobRunId));
 
@@ -308,12 +318,12 @@ class FakeD1Database implements D1Database {
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
-		if (normalized.startsWith("DELETE FROM job_locks")) {
+		if (normalized.startsWith("DELETE FROM kumofire_job_locks")) {
 			this.locks.delete(String(values[0]));
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
-		if (normalized.includes("UPDATE job_runs SET status = 'queued'")) {
+		if (normalized.includes("UPDATE kumofire_job_runs SET status = 'queued'")) {
 			const [updatedAt, jobRunId] = values;
 			const jobRun = this.jobRuns.get(String(jobRunId));
 			if (!jobRun || jobRun.status !== "scheduled") {
@@ -329,7 +339,9 @@ class FakeD1Database implements D1Database {
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
-		if (normalized.includes("UPDATE job_runs SET status = 'running'")) {
+		if (
+			normalized.includes("UPDATE kumofire_job_runs SET status = 'running'")
+		) {
 			const [startedAt, updatedAt, jobRunId] = values;
 			const jobRun = this.jobRuns.get(String(jobRunId));
 			if (!jobRun || jobRun.status !== "queued") {
@@ -346,7 +358,9 @@ class FakeD1Database implements D1Database {
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
-		if (normalized.includes("UPDATE job_runs SET status = 'succeeded'")) {
+		if (
+			normalized.includes("UPDATE kumofire_job_runs SET status = 'succeeded'")
+		) {
 			const [finishedAt, updatedAt, jobRunId] = values;
 			const jobRun = this.jobRuns.get(String(jobRunId));
 			if (!jobRun || jobRun.status !== "running") {
@@ -364,7 +378,9 @@ class FakeD1Database implements D1Database {
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
-		if (normalized.includes("UPDATE job_runs SET status = 'scheduled'")) {
+		if (
+			normalized.includes("UPDATE kumofire_job_runs SET status = 'scheduled'")
+		) {
 			const [nextRunAt, updatedAt, error, jobRunId] = values;
 			const jobRun = this.jobRuns.get(String(jobRunId));
 			if (!jobRun || jobRun.status !== "running") {
@@ -383,7 +399,7 @@ class FakeD1Database implements D1Database {
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
-		if (normalized.includes("UPDATE job_runs SET status = 'failed'")) {
+		if (normalized.includes("UPDATE kumofire_job_runs SET status = 'failed'")) {
 			const [finishedAt, updatedAt, error, jobRunId] = values;
 			const jobRun = this.jobRuns.get(String(jobRunId));
 			if (
@@ -494,10 +510,13 @@ describe("cloudflare adapters", () => {
 	it("exports reference schema SQL", () => {
 		const sql = getReferenceSchemaSql();
 
-		expect(sql).toContain("CREATE TABLE IF NOT EXISTS job_definitions");
-		expect(sql).toContain("CREATE TABLE IF NOT EXISTS job_runs");
-		expect(sql).toContain("CREATE TABLE IF NOT EXISTS job_locks");
-		expect(sql).toContain("CREATE TABLE IF NOT EXISTS schema_version");
+		expect(sql).toContain(
+			"CREATE TABLE IF NOT EXISTS kumofire_job_definitions",
+		);
+		expect(sql).toContain("CREATE TABLE IF NOT EXISTS kumofire_job_runs");
+		expect(sql).toContain("CREATE TABLE IF NOT EXISTS kumofire_job_locks");
+		expect(sql).toContain("CREATE TABLE IF NOT EXISTS kumofire_schema_version");
+		expect(sql).toContain("INSERT INTO kumofire_schema_version");
 	});
 
 	it("stores synchronized definitions in D1", async () => {
