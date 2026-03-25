@@ -6,7 +6,7 @@ import {
 	createJobs,
 } from "./index";
 
-describe("createJobs", () => {
+describe("in-memory adapter", () => {
 	it("creates a job and dispatches it immediately when due", async () => {
 		const now = new Date("2026-03-25T00:00:00.000Z");
 		const storage = createInMemoryStorageAdapter();
