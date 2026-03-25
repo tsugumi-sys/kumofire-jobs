@@ -1,0 +1,22 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@kumofire/jobs':
+        specifier: 0.1.0
+        version: 0.1.0
+
+packages:
+
+  '@kumofire/jobs@0.1.0':
+    resolution: {integrity: sha512-MbJMJEmX8TrgyhyTKKN/157cOtv/FxJEnpYNPML69Lo5Q9G/Bfq+R+2GPuDL5QO1sSRwnmRfJjp51GgOKdp7TA==}
+
+snapshots:
+
+  '@kumofire/jobs@0.1.0': {}
