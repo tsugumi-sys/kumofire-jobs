@@ -9,10 +9,12 @@
 		".": {
 			"types": "./dist/index.d.mts",
 			"import": "./dist/index.mjs"
-		}
+		},
+		"./sql/*": "./sql/*"
 	},
 	"files": [
-		"dist"
+		"dist",
+		"sql"
 	],
 	"scripts": {
 		"build": "tsdown src/index.ts --format esm --dts",
@@ -41,6 +43,9 @@
 		"access": "public"
 	},
 	"packageManager": "pnpm@10.32.1",
+	"dependencies": {
+		"@cloudflare/workers-types": "^4.20260317.1"
+	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.8",
 		"tsdown": "^0.21.4",

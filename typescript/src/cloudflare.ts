@@ -1,4 +1,12 @@
 import type {
+	D1Database as CloudflareD1Database,
+	D1PreparedStatement as CloudflareD1PreparedStatement,
+	D1Response,
+	D1Result,
+	Queue,
+} from "@cloudflare/workers-types";
+import type {
+	JobDefinition,
 	JobQueueAdapter,
 	JobRun,
 	JobRunMessage,
@@ -7,42 +15,28 @@ import type {
 	JsonValue,
 } from "./protocol";
 
-export interface D1RunMeta {
-	changes?: number;
-	rows_written?: number;
-}
-
-export interface D1RunResult {
-	success: boolean;
-	meta?: D1RunMeta;
-}
-
-export interface D1PreparedStatement {
-	bind(...values: unknown[]): D1PreparedStatement;
-	first<T = Record<string, unknown>>(
-		columnName?: keyof T & string,
-	): Promise<T | null>;
-	run(): Promise<D1RunResult>;
-	all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
-}
-
-export interface D1Database {
-	prepare(query: string): D1PreparedStatement;
-}
-
-export interface CloudflareQueue<TMessage = unknown> {
-	send(message: TMessage): Promise<void>;
-}
+export type D1RunMeta = D1Response["meta"];
+export type D1Database = CloudflareD1Database;
+export type D1PreparedStatement = CloudflareD1PreparedStatement;
+export type D1RunResult<T = Record<string, unknown>> = D1Result<T>;
+export type CloudflareQueue<TMessage = unknown> = Queue<TMessage>;
 
 export const requiredSchemaVersion = 1;
 
-export const schemaMigrations = [
-	{
-		version: 1,
-		name: "init",
-		sql: `CREATE TABLE IF NOT EXISTS jobs (
+const initSchemaSql = `CREATE TABLE IF NOT EXISTS job_definitions (
 	id TEXT PRIMARY KEY,
-	name TEXT NOT NULL,
+	name TEXT NOT NULL UNIQUE,
+	handler TEXT NOT NULL,
+	payload_template TEXT,
+	default_options TEXT,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS job_runs (
+	id TEXT PRIMARY KEY,
+	job_id TEXT NOT NULL,
+	job_name TEXT NOT NULL,
 	status TEXT NOT NULL,
 	dedupe_key TEXT,
 	payload TEXT NOT NULL,
@@ -53,27 +47,34 @@ export const schemaMigrations = [
 	updated_at TEXT NOT NULL,
 	started_at TEXT,
 	finished_at TEXT,
-	last_error TEXT
+	last_error TEXT,
+	FOREIGN KEY (job_id) REFERENCES job_definitions(id)
 );
 
-CREATE INDEX IF NOT EXISTS jobs_status_next_run_at_idx
-	ON jobs (status, next_run_at);
+CREATE INDEX IF NOT EXISTS job_runs_status_next_run_at_idx
+	ON job_runs (status, next_run_at);
 
-CREATE UNIQUE INDEX IF NOT EXISTS jobs_dedupe_key_idx
-	ON jobs (dedupe_key)
+CREATE UNIQUE INDEX IF NOT EXISTS job_runs_dedupe_key_idx
+	ON job_runs (dedupe_key)
 	WHERE dedupe_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS job_locks (
-	job_id TEXT PRIMARY KEY,
+	job_run_id TEXT PRIMARY KEY,
 	lease_until TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS schema_version (
-	version INTEGER NOT NULL,
+	version INTEGER PRIMARY KEY,
 	updated_at TEXT NOT NULL
 );
-`,
+`;
+
+export const schemaMigrations = [
+	{
+		version: 1,
+		name: "init",
+		sql: initSchemaSql,
 	},
 ] as const;
 
@@ -85,9 +86,24 @@ function serializePayload(payload: JsonValue): string {
 	return JSON.stringify(payload);
 }
 
-interface D1JobRow {
+function parsePayload(payload: string): JsonValue {
+	return JSON.parse(payload) as JsonValue;
+}
+
+interface D1DefinitionRow {
 	id: string;
 	name: string;
+	handler: string;
+	payload_template: string | null;
+	default_options: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+interface D1JobRunRow {
+	id: string;
+	job_id: string;
+	job_name: string;
 	status: JobRunStatus;
 	dedupe_key: string | null;
 	payload: string;
@@ -101,13 +117,29 @@ interface D1JobRow {
 	last_error: string | null;
 }
 
-function mapJobRow(row: D1JobRow): JobRun {
+function mapDefinitionRow(row: D1DefinitionRow): JobDefinition {
 	return {
 		id: row.id,
-		jobId: row.name,
-		jobName: row.name,
+		name: row.name,
+		handler: row.handler,
+		...(row.payload_template
+			? { payloadTemplate: parsePayload(row.payload_template) }
+			: {}),
+		...(row.default_options
+			? { defaultOptions: parsePayload(row.default_options) }
+			: {}),
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+	};
+}
+
+function mapJobRunRow(row: D1JobRunRow): JobRun {
+	return {
+		id: row.id,
+		jobId: row.job_id,
+		jobName: row.job_name,
 		status: row.status,
-		payload: JSON.parse(row.payload) as JsonValue,
+		payload: parsePayload(row.payload),
 		attempt: row.attempt,
 		maxAttempts: row.max_attempts,
 		scheduledFor: row.next_run_at,
@@ -120,10 +152,25 @@ function mapJobRow(row: D1JobRow): JobRun {
 	};
 }
 
-function createJobSelect(whereClause: string): string {
+function createDefinitionSelect(whereClause: string): string {
 	return `SELECT
 	id,
 	name,
+	handler,
+	payload_template,
+	default_options,
+	created_at,
+	updated_at
+FROM job_definitions
+WHERE ${whereClause}
+LIMIT 1`;
+}
+
+function createJobRunSelect(whereClause: string): string {
+	return `SELECT
+	id,
+	job_id,
+	job_name,
 	status,
 	dedupe_key,
 	payload,
@@ -135,7 +182,7 @@ function createJobSelect(whereClause: string): string {
 	started_at,
 	finished_at,
 	last_error
-FROM jobs
+FROM job_runs
 WHERE ${whereClause}
 LIMIT 1`;
 }
@@ -146,17 +193,30 @@ function requireSuccess(result: D1RunResult, operation: string): void {
 	}
 }
 
-async function fetchJobBy(
+async function fetchDefinitionBy(
+	db: D1Database,
+	whereClause: string,
+	values: unknown[],
+): Promise<JobDefinition | null> {
+	const row = await db
+		.prepare(createDefinitionSelect(whereClause))
+		.bind(...values)
+		.first<D1DefinitionRow>();
+
+	return row ? mapDefinitionRow(row) : null;
+}
+
+async function fetchJobRunBy(
 	db: D1Database,
 	whereClause: string,
 	values: unknown[],
 ): Promise<JobRun | null> {
 	const row = await db
-		.prepare(createJobSelect(whereClause))
+		.prepare(createJobRunSelect(whereClause))
 		.bind(...values)
-		.first<D1JobRow>();
+		.first<D1JobRunRow>();
 
-	return row ? mapJobRow(row) : null;
+	return row ? mapJobRunRow(row) : null;
 }
 
 export function getReferenceSchemaSql(params?: {
@@ -213,6 +273,55 @@ export function createD1StorageAdapter(params: {
 			}
 		},
 
+		async createDefinition(definition) {
+			const insertResult = await params.db
+				.prepare(`INSERT INTO job_definitions (
+	id,
+	name,
+	handler,
+	payload_template,
+	default_options,
+	created_at,
+	updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO NOTHING`)
+				.bind(
+					definition.id,
+					definition.name,
+					definition.handler,
+					definition.payloadTemplate
+						? serializePayload(definition.payloadTemplate)
+						: null,
+					definition.defaultOptions
+						? serializePayload(definition.defaultOptions)
+						: null,
+					definition.createdAt,
+					definition.updatedAt,
+				)
+				.run();
+
+			requireSuccess(insertResult, "create definition");
+
+			const createdDefinition = await fetchDefinitionBy(params.db, "id = ?", [
+				definition.id,
+			]);
+			if (!createdDefinition) {
+				throw new Error(
+					`D1 create definition failed to return row for "${definition.id}"`,
+				);
+			}
+
+			return createdDefinition;
+		},
+
+		getDefinition(jobId) {
+			return fetchDefinitionBy(params.db, "id = ?", [jobId]);
+		},
+
+		getDefinitionByName(jobName) {
+			return fetchDefinitionBy(params.db, "name = ?", [jobName]);
+		},
+
 		async createRun(jobRun) {
 			const createdJobRun: JobRun = {
 				...jobRun,
@@ -220,9 +329,10 @@ export function createD1StorageAdapter(params: {
 			};
 
 			const result = await params.db
-				.prepare(`INSERT INTO jobs (
+				.prepare(`INSERT INTO job_runs (
 	id,
-	name,
+	job_id,
+	job_name,
 	status,
 	dedupe_key,
 	payload,
@@ -234,9 +344,10 @@ export function createD1StorageAdapter(params: {
 	started_at,
 	finished_at,
 	last_error
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 				.bind(
 					createdJobRun.id,
+					createdJobRun.jobId,
 					createdJobRun.jobName,
 					createdJobRun.status,
 					createdJobRun.dedupeKey ?? null,
@@ -252,23 +363,24 @@ export function createD1StorageAdapter(params: {
 				)
 				.run();
 
-			requireSuccess(result, "insert");
+			requireSuccess(result, "insert run");
 			return createdJobRun;
 		},
 
 		getRun(jobRunId) {
-			return fetchJobBy(params.db, "id = ?", [jobRunId]);
+			return fetchJobRunBy(params.db, "id = ?", [jobRunId]);
 		},
 
 		getRunByDedupeKey(dedupeKey) {
-			return fetchJobBy(params.db, "dedupe_key = ?", [dedupeKey]);
+			return fetchJobRunBy(params.db, "dedupe_key = ?", [dedupeKey]);
 		},
 
 		async listDispatchableJobs({ now, limit }) {
 			const result = await params.db
 				.prepare(`SELECT
 	id,
-	name,
+	job_id,
+	job_name,
 	status,
 	dedupe_key,
 	payload,
@@ -280,24 +392,24 @@ export function createD1StorageAdapter(params: {
 	started_at,
 	finished_at,
 	last_error
-FROM jobs
+FROM job_runs
 WHERE status = 'scheduled'
 	AND next_run_at IS NOT NULL
 	AND next_run_at <= ?
 ORDER BY created_at ASC
 LIMIT ?`)
 				.bind(now.toISOString(), limit)
-				.all<D1JobRow>();
+				.all<D1JobRunRow>();
 
-			return result.results.map(mapJobRow);
+			return result.results.map(mapJobRunRow);
 		},
 
 		async acquireLease({ jobRunId, now, leaseMs }) {
 			const leaseUntil = new Date(now.getTime() + leaseMs).toISOString();
 			const result = await params.db
-				.prepare(`INSERT INTO job_locks (job_id, lease_until, updated_at)
+				.prepare(`INSERT INTO job_locks (job_run_id, lease_until, updated_at)
 VALUES (?, ?, ?)
-ON CONFLICT(job_id) DO UPDATE SET
+ON CONFLICT(job_run_id) DO UPDATE SET
 	lease_until = excluded.lease_until,
 	updated_at = excluded.updated_at
 WHERE job_locks.lease_until <= ?`)
@@ -310,7 +422,7 @@ WHERE job_locks.lease_until <= ?`)
 
 		async releaseLease(jobRunId) {
 			const result = await params.db
-				.prepare("DELETE FROM job_locks WHERE job_id = ?")
+				.prepare("DELETE FROM job_locks WHERE job_run_id = ?")
 				.bind(jobRunId)
 				.run();
 
@@ -320,7 +432,7 @@ WHERE job_locks.lease_until <= ?`)
 		async markQueued({ jobRunId, now }) {
 			const timestamp = now.toISOString();
 			const result = await params.db
-				.prepare(`UPDATE jobs
+				.prepare(`UPDATE job_runs
 SET status = 'queued',
 	updated_at = ?
 WHERE id = ?
@@ -333,13 +445,13 @@ WHERE id = ?
 				return null;
 			}
 
-			return fetchJobBy(params.db, "id = ?", [jobRunId]);
+			return fetchJobRunBy(params.db, "id = ?", [jobRunId]);
 		},
 
 		async markRunning({ jobRunId, now }) {
 			const timestamp = now.toISOString();
 			const result = await params.db
-				.prepare(`UPDATE jobs
+				.prepare(`UPDATE job_runs
 SET status = 'running',
 	started_at = ?,
 	updated_at = ?
@@ -353,13 +465,13 @@ WHERE id = ?
 				return null;
 			}
 
-			return fetchJobBy(params.db, "id = ?", [jobRunId]);
+			return fetchJobRunBy(params.db, "id = ?", [jobRunId]);
 		},
 
 		async markSucceeded({ jobRunId, now }) {
 			const timestamp = now.toISOString();
 			const result = await params.db
-				.prepare(`UPDATE jobs
+				.prepare(`UPDATE job_runs
 SET status = 'succeeded',
 	finished_at = ?,
 	updated_at = ?,
@@ -374,13 +486,13 @@ WHERE id = ?
 				return null;
 			}
 
-			return fetchJobBy(params.db, "id = ?", [jobRunId]);
+			return fetchJobRunBy(params.db, "id = ?", [jobRunId]);
 		},
 
 		async markRetryable({ jobRunId, now, nextRunAt, error }) {
 			const timestamp = now.toISOString();
 			const result = await params.db
-				.prepare(`UPDATE jobs
+				.prepare(`UPDATE job_runs
 SET status = 'scheduled',
 	attempt = attempt + 1,
 	next_run_at = ?,
@@ -396,13 +508,13 @@ WHERE id = ?
 				return null;
 			}
 
-			return fetchJobBy(params.db, "id = ?", [jobRunId]);
+			return fetchJobRunBy(params.db, "id = ?", [jobRunId]);
 		},
 
 		async markFailed({ jobRunId, now, error }) {
 			const timestamp = now.toISOString();
 			const result = await params.db
-				.prepare(`UPDATE jobs
+				.prepare(`UPDATE job_runs
 SET status = 'failed',
 	attempt = attempt + 1,
 	finished_at = ?,
@@ -418,7 +530,7 @@ WHERE id = ?
 				return null;
 			}
 
-			return fetchJobBy(params.db, "id = ?", [jobRunId]);
+			return fetchJobRunBy(params.db, "id = ?", [jobRunId]);
 		},
 	};
 }
