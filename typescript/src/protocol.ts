@@ -4,44 +4,71 @@ export type JsonValue =
 	| JsonValue[]
 	| { [key: string]: JsonValue };
 
-export type JobStatus =
+export type JobRunStatus =
+	| "scheduled"
 	| "queued"
 	| "running"
 	| "succeeded"
 	| "failed"
 	| "canceled";
 
-export interface JobRecord<TPayload extends JsonValue = JsonValue> {
+export interface JobDefinition {
 	id: string;
 	name: string;
-	status: JobStatus;
+	handler: string;
+	payloadTemplate?: JsonValue;
+	defaultOptions?: JsonValue;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export type JobScheduleType = "once" | "interval" | "cron";
+
+export interface JobSchedule {
+	id: string;
+	jobId: string;
+	scheduleType: JobScheduleType;
+	scheduleExpr: string;
+	timezone: string | null;
+	nextRunAt: string | null;
+	lastScheduledAt: string | null;
+	enabled: boolean;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface JobRun<TPayload extends JsonValue = JsonValue> {
+	id: string;
+	jobName: string;
+	status: JobRunStatus;
 	payload: TPayload;
 	attempt: number;
 	maxAttempts: number;
-	nextRunAt: string | null;
+	scheduledFor: string | null;
 	createdAt: string;
 	updatedAt: string;
 	startedAt: string | null;
 	finishedAt: string | null;
 	lastError: string | null;
+	scheduleId?: string;
 	dedupeKey?: string;
 }
 
-export interface JobStatusView {
+export interface JobRunStatusView {
 	id: string;
-	name: string;
-	status: JobStatus;
+	jobName: string;
+	status: JobRunStatus;
 	attempt: number;
 	maxAttempts: number;
-	nextRunAt: string | null;
+	scheduledFor: string | null;
 	startedAt: string | null;
 	finishedAt: string | null;
 	lastError: string | null;
 }
 
-export interface JobMessage {
+export interface JobRunMessage {
 	version: 1;
-	jobId: string;
+	jobRunId: string;
 }
 
 export interface CreateJobInput<TPayload extends JsonValue = JsonValue> {
@@ -57,13 +84,13 @@ export interface RetryPolicy {
 	getNextRunAt: (params: {
 		attempt: number;
 		error: unknown;
-		job: JobRecord;
+		job: JobRun;
 		now: Date;
 	}) => Date;
 }
 
 export interface JobHandlerContext<TPayload extends JsonValue = JsonValue> {
-	job: JobRecord<TPayload>;
+	job: JobRun<TPayload>;
 	now: Date;
 }
 
@@ -75,39 +102,37 @@ export type JobHandlerMap = Record<string, JobHandler>;
 
 export interface JobStorageAdapter {
 	verifySchemaVersion?(): Promise<void>;
-	createJob(job: JobRecord): Promise<JobRecord>;
-	getJob(jobId: string): Promise<JobRecord | null>;
-	getJobByDedupeKey(dedupeKey: string): Promise<JobRecord | null>;
-	listDispatchableJobs(params: {
-		now: Date;
-		limit: number;
-	}): Promise<JobRecord[]>;
+	createRun(jobRun: JobRun): Promise<JobRun>;
+	getRun(jobRunId: string): Promise<JobRun | null>;
+	getRunByDedupeKey(dedupeKey: string): Promise<JobRun | null>;
+	listDispatchableJobs(params: { now: Date; limit: number }): Promise<JobRun[]>;
 	acquireLease(params: {
-		jobId: string;
+		jobRunId: string;
 		now: Date;
 		leaseMs: number;
 	}): Promise<boolean>;
-	releaseLease(jobId: string): Promise<void>;
-	markRunning(params: { jobId: string; now: Date }): Promise<JobRecord | null>;
+	releaseLease(jobRunId: string): Promise<void>;
+	markQueued(params: { jobRunId: string; now: Date }): Promise<JobRun | null>;
+	markRunning(params: { jobRunId: string; now: Date }): Promise<JobRun | null>;
 	markSucceeded(params: {
-		jobId: string;
+		jobRunId: string;
 		now: Date;
-	}): Promise<JobRecord | null>;
+	}): Promise<JobRun | null>;
 	markRetryable(params: {
-		jobId: string;
+		jobRunId: string;
 		now: Date;
 		nextRunAt: Date;
 		error: string;
-	}): Promise<JobRecord | null>;
+	}): Promise<JobRun | null>;
 	markFailed(params: {
-		jobId: string;
+		jobRunId: string;
 		now: Date;
 		error: string;
-	}): Promise<JobRecord | null>;
+	}): Promise<JobRun | null>;
 }
 
 export interface JobQueueAdapter {
-	send(message: JobMessage): Promise<void>;
+	send(message: JobRunMessage): Promise<void>;
 }
 
 export interface CreateJobsOptions<THandlers extends JobHandlerMap> {
@@ -126,5 +151,5 @@ export interface DispatchResult {
 
 export interface ConsumeResult {
 	outcome: "ignored" | "succeeded" | "retried" | "failed" | "canceled";
-	jobId: string;
+	jobRunId: string;
 }

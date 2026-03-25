@@ -1,162 +1,180 @@
 import type {
-	JobMessage,
 	JobQueueAdapter,
-	JobRecord,
+	JobRun,
+	JobRunMessage,
 	JobStorageAdapter,
 } from "./protocol";
 
 export interface InMemoryStorageAdapter extends JobStorageAdapter {
-	seed(job: JobRecord): Promise<void>;
+	seed(jobRun: JobRun): Promise<void>;
 }
 
 export interface InMemoryQueueAdapter extends JobQueueAdapter {
-	messages: JobMessage[];
+	messages: JobRunMessage[];
 }
 
 export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
-	const jobs = new Map<string, JobRecord>();
+	const jobRuns = new Map<string, JobRun>();
 	const dedupeIndex = new Map<string, string>();
 	const locks = new Map<string, { leaseUntil: number }>();
 
 	return {
-		async seed(job) {
-			jobs.set(job.id, { ...job });
-			if (job.dedupeKey) {
-				dedupeIndex.set(job.dedupeKey, job.id);
+		async seed(jobRun) {
+			jobRuns.set(jobRun.id, { ...jobRun });
+			if (jobRun.dedupeKey) {
+				dedupeIndex.set(jobRun.dedupeKey, jobRun.id);
 			}
 		},
 
-		async createJob(job) {
-			if (job.dedupeKey) {
-				const existingId = dedupeIndex.get(job.dedupeKey);
+		async createRun(jobRun) {
+			if (jobRun.dedupeKey) {
+				const existingId = dedupeIndex.get(jobRun.dedupeKey);
 				if (existingId) {
-					const existingJob = jobs.get(existingId);
+					const existingJob = jobRuns.get(existingId);
 					if (existingJob) {
 						return { ...existingJob };
 					}
 				}
-				dedupeIndex.set(job.dedupeKey, job.id);
+				dedupeIndex.set(jobRun.dedupeKey, jobRun.id);
 			}
 
-			jobs.set(job.id, { ...job });
-			return { ...job };
+			jobRuns.set(jobRun.id, { ...jobRun });
+			return { ...jobRun };
 		},
 
-		async getJob(jobId) {
-			const job = jobs.get(jobId);
-			return job ? { ...job } : null;
+		async getRun(jobRunId) {
+			const jobRun = jobRuns.get(jobRunId);
+			return jobRun ? { ...jobRun } : null;
 		},
 
-		async getJobByDedupeKey(dedupeKey) {
-			const jobId = dedupeIndex.get(dedupeKey);
-			if (!jobId) {
+		async getRunByDedupeKey(dedupeKey) {
+			const jobRunId = dedupeIndex.get(dedupeKey);
+			if (!jobRunId) {
 				return null;
 			}
 
-			const job = jobs.get(jobId);
-			return job ? { ...job } : null;
+			const jobRun = jobRuns.get(jobRunId);
+			return jobRun ? { ...jobRun } : null;
 		},
 
 		async listDispatchableJobs({ now, limit }) {
-			return [...jobs.values()]
+			return [...jobRuns.values()]
 				.filter(
-					(job) =>
-						job.status === "queued" &&
-						job.nextRunAt !== null &&
-						new Date(job.nextRunAt).getTime() <= now.getTime(),
+					(jobRun) =>
+						jobRun.status === "scheduled" &&
+						jobRun.scheduledFor !== null &&
+						new Date(jobRun.scheduledFor).getTime() <= now.getTime(),
 				)
 				.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
 				.slice(0, limit)
-				.map((job) => ({ ...job }));
+				.map((jobRun) => ({ ...jobRun }));
 		},
 
-		async acquireLease({ jobId, now, leaseMs }) {
-			const existing = locks.get(jobId);
+		async acquireLease({ jobRunId, now, leaseMs }) {
+			const existing = locks.get(jobRunId);
 			if (existing && existing.leaseUntil > now.getTime()) {
 				return false;
 			}
 
-			locks.set(jobId, { leaseUntil: now.getTime() + leaseMs });
+			locks.set(jobRunId, { leaseUntil: now.getTime() + leaseMs });
 			return true;
 		},
 
-		async releaseLease(jobId) {
-			locks.delete(jobId);
+		async releaseLease(jobRunId) {
+			locks.delete(jobRunId);
 		},
 
-		async markRunning({ jobId, now }) {
-			const job = jobs.get(jobId);
-			if (!job || job.status !== "queued") {
+		async markQueued({ jobRunId, now }) {
+			const jobRun = jobRuns.get(jobRunId);
+			if (!jobRun || jobRun.status !== "scheduled") {
 				return null;
 			}
 
-			const updated: JobRecord = {
-				...job,
+			const updated: JobRun = {
+				...jobRun,
+				status: "queued",
+				updatedAt: now.toISOString(),
+			};
+			jobRuns.set(jobRunId, updated);
+			return { ...updated };
+		},
+
+		async markRunning({ jobRunId, now }) {
+			const jobRun = jobRuns.get(jobRunId);
+			if (!jobRun || jobRun.status !== "queued") {
+				return null;
+			}
+
+			const updated: JobRun = {
+				...jobRun,
 				status: "running",
 				startedAt: now.toISOString(),
 				updatedAt: now.toISOString(),
 			};
-			jobs.set(jobId, updated);
+			jobRuns.set(jobRunId, updated);
 			return { ...updated };
 		},
 
-		async markSucceeded({ jobId, now }) {
-			const job = jobs.get(jobId);
-			if (!job || job.status !== "running") {
+		async markSucceeded({ jobRunId, now }) {
+			const jobRun = jobRuns.get(jobRunId);
+			if (!jobRun || jobRun.status !== "running") {
 				return null;
 			}
 
-			const updated: JobRecord = {
-				...job,
+			const updated: JobRun = {
+				...jobRun,
 				status: "succeeded",
 				finishedAt: now.toISOString(),
 				updatedAt: now.toISOString(),
 				lastError: null,
 			};
-			jobs.set(jobId, updated);
+			jobRuns.set(jobRunId, updated);
 			return { ...updated };
 		},
 
-		async markRetryable({ jobId, now, nextRunAt, error }) {
-			const job = jobs.get(jobId);
-			if (!job || job.status !== "running") {
+		async markRetryable({ jobRunId, now, nextRunAt, error }) {
+			const jobRun = jobRuns.get(jobRunId);
+			if (!jobRun || jobRun.status !== "running") {
 				return null;
 			}
 
-			const updated: JobRecord = {
-				...job,
-				status: "queued",
-				attempt: job.attempt + 1,
-				nextRunAt: nextRunAt.toISOString(),
+			const updated: JobRun = {
+				...jobRun,
+				status: "scheduled",
+				attempt: jobRun.attempt + 1,
+				scheduledFor: nextRunAt.toISOString(),
 				updatedAt: now.toISOString(),
 				lastError: error,
 			};
-			jobs.set(jobId, updated);
+			jobRuns.set(jobRunId, updated);
 			return { ...updated };
 		},
 
-		async markFailed({ jobId, now, error }) {
-			const job = jobs.get(jobId);
-			if (!job || (job.status !== "running" && job.status !== "queued")) {
+		async markFailed({ jobRunId, now, error }) {
+			const jobRun = jobRuns.get(jobRunId);
+			if (
+				!jobRun ||
+				(jobRun.status !== "running" && jobRun.status !== "queued")
+			) {
 				return null;
 			}
 
-			const updated: JobRecord = {
-				...job,
+			const updated: JobRun = {
+				...jobRun,
 				status: "failed",
-				attempt: job.attempt + 1,
+				attempt: jobRun.attempt + 1,
 				finishedAt: now.toISOString(),
 				updatedAt: now.toISOString(),
 				lastError: error,
 			};
-			jobs.set(jobId, updated);
+			jobRuns.set(jobRunId, updated);
 			return { ...updated };
 		},
 	};
 }
 
 export function createInMemoryQueueAdapter(): InMemoryQueueAdapter {
-	const messages: JobMessage[] = [];
+	const messages: JobRunMessage[] = [];
 
 	return {
 		messages,

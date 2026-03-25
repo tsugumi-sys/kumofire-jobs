@@ -25,7 +25,7 @@ describe("createJobs", () => {
 			payload: { to: "user@example.com" },
 		});
 
-		expect(queue.messages).toEqual([{ version: 1, jobId: result.jobId }]);
+		expect(queue.messages).toEqual([{ version: 1, jobRunId: result.jobId }]);
 		await expect(jobs.getStatus(result.jobId)).resolves.toMatchObject({
 			id: result.jobId,
 			status: "queued",
@@ -33,7 +33,7 @@ describe("createJobs", () => {
 		});
 	});
 
-	it("registers a future job without dispatching it until dispatch() runs", async () => {
+	it("creates a future run as scheduled until dispatch() enqueues it", async () => {
 		let now = new Date("2026-03-25T00:00:00.000Z");
 		const storage = createInMemoryStorageAdapter();
 		const queue = createInMemoryQueueAdapter();
@@ -53,10 +53,16 @@ describe("createJobs", () => {
 		});
 
 		expect(queue.messages).toEqual([]);
+		await expect(jobs.getStatus(result.jobId)).resolves.toMatchObject({
+			status: "scheduled",
+		});
 
 		now = new Date("2026-03-25T00:05:00.000Z");
 		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
-		expect(queue.messages).toEqual([{ version: 1, jobId: result.jobId }]);
+		expect(queue.messages).toEqual([{ version: 1, jobRunId: result.jobId }]);
+		await expect(jobs.getStatus(result.jobId)).resolves.toMatchObject({
+			status: "queued",
+		});
 	});
 
 	it("marks a job as succeeded after the handler completes", async () => {
@@ -83,7 +89,7 @@ describe("createJobs", () => {
 		}
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "succeeded",
-			jobId,
+			jobRunId: jobId,
 		});
 		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
 			status: "succeeded",
@@ -92,8 +98,8 @@ describe("createJobs", () => {
 		});
 	});
 
-	it("requeues a failed job when retries remain", async () => {
-		const now = new Date("2026-03-25T00:00:00.000Z");
+	it("moves a failed run back to scheduled when retries remain", async () => {
+		let now = new Date("2026-03-25T00:00:00.000Z");
 		const storage = createInMemoryStorageAdapter();
 		const queue = createInMemoryQueueAdapter();
 		const jobs = createJobs({
@@ -123,18 +129,29 @@ describe("createJobs", () => {
 		}
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "retried",
-			jobId,
+			jobRunId: jobId,
 		});
+		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
+			status: "scheduled",
+			attempt: 1,
+			lastError: "temporary failure",
+			scheduledFor: "2026-03-25T00:00:05.000Z",
+		});
+
+		now = new Date("2026-03-25T00:00:05.000Z");
+		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
+		expect(queue.messages).toEqual([
+			{ version: 1, jobRunId: jobId },
+			{ version: 1, jobRunId: jobId },
+		]);
 		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
 			status: "queued",
 			attempt: 1,
-			lastError: "temporary failure",
-			nextRunAt: "2026-03-25T00:00:05.000Z",
 		});
 	});
 
 	it("marks a job as failed when retries are exhausted", async () => {
-		const now = new Date("2026-03-25T00:00:00.000Z");
+		let now = new Date("2026-03-25T00:00:00.000Z");
 		const storage = createInMemoryStorageAdapter();
 		const queue = createInMemoryQueueAdapter();
 		const jobs = createJobs({
@@ -163,15 +180,17 @@ describe("createJobs", () => {
 			throw new Error("expected a queue message");
 		}
 		await jobs.consume(message);
-		const retriedJob = await storage.getJob(jobId);
-		if (!retriedJob) {
-			throw new Error("expected a retried job");
-		}
-		await storage.seed({ ...retriedJob, status: "queued" });
+		now = new Date("2026-03-25T00:00:05.000Z");
+		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
 
-		await expect(jobs.consume(message)).resolves.toEqual({
+		const retryMessage = queue.messages[1];
+		if (!retryMessage) {
+			throw new Error("expected a retry queue message");
+		}
+
+		await expect(jobs.consume(retryMessage)).resolves.toEqual({
 			outcome: "failed",
-			jobId,
+			jobRunId: jobId,
 		});
 		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
 			status: "failed",

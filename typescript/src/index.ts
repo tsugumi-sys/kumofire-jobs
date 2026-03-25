@@ -4,9 +4,9 @@ import type {
 	CreateJobsOptions,
 	DispatchResult,
 	JobHandlerMap,
-	JobMessage,
-	JobRecord,
-	JobStatusView,
+	JobRun,
+	JobRunMessage,
+	JobRunStatusView,
 	JsonValue,
 	RetryPolicy,
 } from "./protocol";
@@ -52,17 +52,17 @@ function serializeError(error: unknown): string {
 	return String(error);
 }
 
-function toStatusView(job: JobRecord): JobStatusView {
+function toStatusView(jobRun: JobRun): JobRunStatusView {
 	return {
-		id: job.id,
-		name: job.name,
-		status: job.status,
-		attempt: job.attempt,
-		maxAttempts: job.maxAttempts,
-		nextRunAt: job.nextRunAt,
-		startedAt: job.startedAt,
-		finishedAt: job.finishedAt,
-		lastError: job.lastError,
+		id: jobRun.id,
+		jobName: jobRun.jobName,
+		status: jobRun.status,
+		attempt: jobRun.attempt,
+		maxAttempts: jobRun.maxAttempts,
+		scheduledFor: jobRun.scheduledFor,
+		startedAt: jobRun.startedAt,
+		finishedAt: jobRun.finishedAt,
+		lastError: jobRun.lastError,
 	};
 }
 
@@ -94,7 +94,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 			await ensureSchemaVersion();
 
 			if (input.dedupeKey) {
-				const existingJob = await options.storage.getJobByDedupeKey(
+				const existingJob = await options.storage.getRunByDedupeKey(
 					input.dedupeKey,
 				);
 
@@ -105,14 +105,14 @@ export function createJobs<THandlers extends JobHandlerMap>(
 
 			const now = getNow();
 			const nextRunAt = input.runAt ?? now;
-			const job: JobRecord<TPayload> = {
+			const jobRun: JobRun<TPayload> = {
 				id: generateId(),
-				name: input.name,
-				status: "queued",
+				jobName: input.name,
+				status: "scheduled",
 				payload: input.payload,
 				attempt: 0,
 				maxAttempts: input.maxAttempts ?? retry.maxAttempts,
-				nextRunAt: nextRunAt.toISOString(),
+				scheduledFor: nextRunAt.toISOString(),
 				createdAt: now.toISOString(),
 				updatedAt: now.toISOString(),
 				startedAt: null,
@@ -121,13 +121,22 @@ export function createJobs<THandlers extends JobHandlerMap>(
 				...(input.dedupeKey ? { dedupeKey: input.dedupeKey } : {}),
 			};
 
-			await options.storage.createJob(job);
+			await options.storage.createRun(jobRun);
 
 			if (nextRunAt.getTime() <= now.getTime()) {
-				await options.queue.send({ version: MESSAGE_VERSION, jobId: job.id });
+				const queuedJob = await options.storage.markQueued({
+					jobRunId: jobRun.id,
+					now,
+				});
+				if (queuedJob) {
+					await options.queue.send({
+						version: MESSAGE_VERSION,
+						jobRunId: jobRun.id,
+					});
+				}
 			}
 
-			return { jobId: job.id };
+			return { jobId: jobRun.id };
 		},
 
 		async dispatch(input?: { limit?: number }): Promise<DispatchResult> {
@@ -135,16 +144,29 @@ export function createJobs<THandlers extends JobHandlerMap>(
 
 			const now = getNow();
 			const limit = input?.limit ?? 100;
-			const jobs = await options.storage.listDispatchableJobs({ now, limit });
+			const jobRuns = await options.storage.listDispatchableJobs({
+				now,
+				limit,
+			});
 
-			for (const job of jobs) {
-				await options.queue.send({ version: MESSAGE_VERSION, jobId: job.id });
+			for (const jobRun of jobRuns) {
+				const queuedJob = await options.storage.markQueued({
+					jobRunId: jobRun.id,
+					now,
+				});
+				if (!queuedJob) {
+					continue;
+				}
+				await options.queue.send({
+					version: MESSAGE_VERSION,
+					jobRunId: jobRun.id,
+				});
 			}
 
-			return { dispatched: jobs.length };
+			return { dispatched: jobRuns.length };
 		},
 
-		async consume(message: JobMessage): Promise<ConsumeResult> {
+		async consume(message: JobRunMessage): Promise<ConsumeResult> {
 			await ensureSchemaVersion();
 
 			if (message.version !== MESSAGE_VERSION) {
@@ -152,48 +174,51 @@ export function createJobs<THandlers extends JobHandlerMap>(
 			}
 
 			const now = getNow();
-			const job = await options.storage.getJob(message.jobId);
+			const jobRun = await options.storage.getRun(message.jobRunId);
 
-			if (!job || job.status === "canceled") {
-				return { outcome: "ignored", jobId: message.jobId };
+			if (!jobRun || jobRun.status === "canceled") {
+				return { outcome: "ignored", jobRunId: message.jobRunId };
 			}
 
 			const acquired = await options.storage.acquireLease({
-				jobId: job.id,
+				jobRunId: jobRun.id,
 				now,
 				leaseMs,
 			});
 
 			if (!acquired) {
-				return { outcome: "ignored", jobId: job.id };
+				return { outcome: "ignored", jobRunId: jobRun.id };
 			}
 
 			try {
 				const runningJob = await options.storage.markRunning({
-					jobId: job.id,
+					jobRunId: jobRun.id,
 					now,
 				});
 
 				if (!runningJob) {
-					return { outcome: "ignored", jobId: job.id };
+					return { outcome: "ignored", jobRunId: jobRun.id };
 				}
 
-				const handler = options.handlers[runningJob.name];
+				const handler = options.handlers[runningJob.jobName];
 
 				if (!handler) {
-					const missingHandlerError = `Missing handler for job "${runningJob.name}"`;
+					const missingHandlerError = `Missing handler for job "${runningJob.jobName}"`;
 					await options.storage.markFailed({
-						jobId: runningJob.id,
+						jobRunId: runningJob.id,
 						now,
 						error: missingHandlerError,
 					});
-					return { outcome: "failed", jobId: runningJob.id };
+					return { outcome: "failed", jobRunId: runningJob.id };
 				}
 
 				try {
 					await handler({ job: runningJob, now });
-					await options.storage.markSucceeded({ jobId: runningJob.id, now });
-					return { outcome: "succeeded", jobId: runningJob.id };
+					await options.storage.markSucceeded({
+						jobRunId: runningJob.id,
+						now,
+					});
+					return { outcome: "succeeded", jobRunId: runningJob.id };
 				} catch (error) {
 					const errorMessage = serializeError(error);
 					const nextAttempt = runningJob.attempt + 1;
@@ -207,31 +232,31 @@ export function createJobs<THandlers extends JobHandlerMap>(
 						});
 
 						await options.storage.markRetryable({
-							jobId: runningJob.id,
+							jobRunId: runningJob.id,
 							now,
 							nextRunAt,
 							error: errorMessage,
 						});
-						return { outcome: "retried", jobId: runningJob.id };
+						return { outcome: "retried", jobRunId: runningJob.id };
 					}
 
 					await options.storage.markFailed({
-						jobId: runningJob.id,
+						jobRunId: runningJob.id,
 						now,
 						error: errorMessage,
 					});
-					return { outcome: "failed", jobId: runningJob.id };
+					return { outcome: "failed", jobRunId: runningJob.id };
 				}
 			} finally {
-				await options.storage.releaseLease(job.id);
+				await options.storage.releaseLease(jobRun.id);
 			}
 		},
 
-		async getStatus(jobId: string): Promise<JobStatusView | null> {
+		async getStatus(jobId: string): Promise<JobRunStatusView | null> {
 			await ensureSchemaVersion();
 
-			const job = await options.storage.getJob(jobId);
-			return job ? toStatusView(job) : null;
+			const jobRun = await options.storage.getRun(jobId);
+			return jobRun ? toStatusView(jobRun) : null;
 		},
 	};
 }
@@ -260,14 +285,17 @@ export type {
 	CreateJobInput,
 	CreateJobsOptions,
 	DispatchResult,
+	JobDefinition,
 	JobHandler,
 	JobHandlerContext,
 	JobHandlerMap,
-	JobMessage,
 	JobQueueAdapter,
-	JobRecord,
-	JobStatus,
-	JobStatusView,
+	JobRun,
+	JobRunMessage,
+	JobRunStatus,
+	JobRunStatusView,
+	JobSchedule,
+	JobScheduleType,
 	JobStorageAdapter,
 	JsonPrimitive,
 	JsonValue,

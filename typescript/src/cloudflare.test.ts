@@ -8,14 +8,20 @@ import {
 	type D1PreparedStatement,
 	type D1RunResult,
 	getReferenceSchemaSql,
-	type JobMessage,
+	type JobRunMessage,
 	requiredSchemaVersion,
 } from "./index";
 
 interface StoredJobRow {
 	id: string;
 	name: string;
-	status: "queued" | "running" | "succeeded" | "failed" | "canceled";
+	status:
+		| "scheduled"
+		| "queued"
+		| "running"
+		| "succeeded"
+		| "failed"
+		| "canceled";
 	dedupe_key: string | null;
 	payload: string;
 	attempt: number;
@@ -101,7 +107,7 @@ class FakeD1Database implements D1Database {
 
 	all<T>(query: string, values: unknown[]): T[] {
 		const normalized = normalizeSql(query);
-		if (!normalized.includes("FROM jobs WHERE status = 'queued'")) {
+		if (!normalized.includes("FROM jobs WHERE status = 'scheduled'")) {
 			throw new Error(`Unsupported all() query: ${normalized}`);
 		}
 
@@ -114,7 +120,7 @@ class FakeD1Database implements D1Database {
 		return [...this.jobs.values()]
 			.filter(
 				(job) =>
-					job.status === "queued" &&
+					job.status === "scheduled" &&
 					job.next_run_at !== null &&
 					job.next_run_at <= now,
 			)
@@ -179,6 +185,18 @@ class FakeD1Database implements D1Database {
 			return { success: true, meta: { changes: 1 } };
 		}
 
+		if (normalized.includes("SET status = 'queued'")) {
+			const [updatedAt, jobId] = values;
+			const job = this.jobs.get(String(jobId));
+			if (!job || job.status !== "scheduled") {
+				return { success: true, meta: { changes: 0 } };
+			}
+
+			job.status = "queued";
+			job.updated_at = String(updatedAt);
+			return { success: true, meta: { changes: 1 } };
+		}
+
 		if (normalized.includes("SET status = 'running'")) {
 			const [startedAt, updatedAt, jobId] = values;
 			const job = this.jobs.get(String(jobId));
@@ -206,14 +224,14 @@ class FakeD1Database implements D1Database {
 			return { success: true, meta: { changes: 1 } };
 		}
 
-		if (normalized.includes("SET status = 'queued'")) {
+		if (normalized.includes("SET status = 'scheduled'")) {
 			const [nextRunAt, updatedAt, error, jobId] = values;
 			const job = this.jobs.get(String(jobId));
 			if (!job || job.status !== "running") {
 				return { success: true, meta: { changes: 0 } };
 			}
 
-			job.status = "queued";
+			job.status = "scheduled";
 			job.attempt += 1;
 			job.next_run_at = String(nextRunAt);
 			job.updated_at = String(updatedAt);
@@ -260,7 +278,7 @@ describe("cloudflare adapters", () => {
 	it("runs the lifecycle against the D1 storage adapter", async () => {
 		const now = new Date("2026-03-25T00:00:00.000Z");
 		const db = new FakeD1Database();
-		const queueMessages: JobMessage[] = [];
+		const queueMessages: JobRunMessage[] = [];
 		const jobs = createJobs({
 			storage: createD1StorageAdapter({ db }),
 			queue: createCloudflareQueueAdapter({
@@ -279,14 +297,14 @@ describe("cloudflare adapters", () => {
 			payload: { to: "user@example.com" },
 		});
 
-		expect(queueMessages).toEqual([{ version: 1, jobId }]);
+		expect(queueMessages).toEqual([{ version: 1, jobRunId: jobId }]);
 		const message = queueMessages[0];
 		if (!message) {
 			throw new Error("expected a queue message");
 		}
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "succeeded",
-			jobId,
+			jobRunId: jobId,
 		});
 		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
 			status: "succeeded",

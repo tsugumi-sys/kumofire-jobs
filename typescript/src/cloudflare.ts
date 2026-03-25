@@ -1,8 +1,8 @@
 import type {
-	JobMessage,
 	JobQueueAdapter,
-	JobRecord,
-	JobStatus,
+	JobRun,
+	JobRunMessage,
+	JobRunStatus,
 	JobStorageAdapter,
 	JsonValue,
 } from "./protocol";
@@ -88,7 +88,7 @@ function serializePayload(payload: JsonValue): string {
 interface D1JobRow {
 	id: string;
 	name: string;
-	status: JobStatus;
+	status: JobRunStatus;
 	dedupe_key: string | null;
 	payload: string;
 	attempt: number;
@@ -101,15 +101,15 @@ interface D1JobRow {
 	last_error: string | null;
 }
 
-function mapJobRow(row: D1JobRow): JobRecord {
+function mapJobRow(row: D1JobRow): JobRun {
 	return {
 		id: row.id,
-		name: row.name,
+		jobName: row.name,
 		status: row.status,
 		payload: JSON.parse(row.payload) as JsonValue,
 		attempt: row.attempt,
 		maxAttempts: row.max_attempts,
-		nextRunAt: row.next_run_at,
+		scheduledFor: row.next_run_at,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 		startedAt: row.started_at,
@@ -149,7 +149,7 @@ async function fetchJobBy(
 	db: D1Database,
 	whereClause: string,
 	values: unknown[],
-): Promise<JobRecord | null> {
+): Promise<JobRun | null> {
 	const row = await db
 		.prepare(createJobSelect(whereClause))
 		.bind(...values)
@@ -175,7 +175,7 @@ export function getReferenceSchemaSql(params?: {
 }
 
 export function createCloudflareQueueAdapter(
-	queue: CloudflareQueue<JobMessage>,
+	queue: CloudflareQueue<JobRunMessage>,
 ): JobQueueAdapter {
 	return {
 		send(message) {
@@ -206,7 +206,7 @@ export function createD1StorageAdapter(params: {
 			}
 		},
 
-		async createJob(job) {
+		async createRun(jobRun) {
 			const result = await params.db
 				.prepare(`INSERT INTO jobs (
 	id,
@@ -224,31 +224,31 @@ export function createD1StorageAdapter(params: {
 	last_error
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 				.bind(
-					job.id,
-					job.name,
-					job.status,
-					job.dedupeKey ?? null,
-					serializePayload(job.payload),
-					job.attempt,
-					job.maxAttempts,
-					job.nextRunAt,
-					job.createdAt,
-					job.updatedAt,
-					job.startedAt,
-					job.finishedAt,
-					job.lastError,
+					jobRun.id,
+					jobRun.jobName,
+					jobRun.status,
+					jobRun.dedupeKey ?? null,
+					serializePayload(jobRun.payload),
+					jobRun.attempt,
+					jobRun.maxAttempts,
+					jobRun.scheduledFor,
+					jobRun.createdAt,
+					jobRun.updatedAt,
+					jobRun.startedAt,
+					jobRun.finishedAt,
+					jobRun.lastError,
 				)
 				.run();
 
 			requireSuccess(result, "insert");
-			return job;
+			return jobRun;
 		},
 
-		getJob(jobId) {
-			return fetchJobBy(params.db, "id = ?", [jobId]);
+		getRun(jobRunId) {
+			return fetchJobBy(params.db, "id = ?", [jobRunId]);
 		},
 
-		getJobByDedupeKey(dedupeKey) {
+		getRunByDedupeKey(dedupeKey) {
 			return fetchJobBy(params.db, "dedupe_key = ?", [dedupeKey]);
 		},
 
@@ -269,7 +269,7 @@ export function createD1StorageAdapter(params: {
 	finished_at,
 	last_error
 FROM jobs
-WHERE status = 'queued'
+WHERE status = 'scheduled'
 	AND next_run_at IS NOT NULL
 	AND next_run_at <= ?
 ORDER BY created_at ASC
@@ -280,7 +280,7 @@ LIMIT ?`)
 			return result.results.map(mapJobRow);
 		},
 
-		async acquireLease({ jobId, now, leaseMs }) {
+		async acquireLease({ jobRunId, now, leaseMs }) {
 			const leaseUntil = new Date(now.getTime() + leaseMs).toISOString();
 			const result = await params.db
 				.prepare(`INSERT INTO job_locks (job_id, lease_until, updated_at)
@@ -289,23 +289,42 @@ ON CONFLICT(job_id) DO UPDATE SET
 	lease_until = excluded.lease_until,
 	updated_at = excluded.updated_at
 WHERE job_locks.lease_until <= ?`)
-				.bind(jobId, leaseUntil, now.toISOString(), now.toISOString())
+				.bind(jobRunId, leaseUntil, now.toISOString(), now.toISOString())
 				.run();
 
 			requireSuccess(result, "acquire lease");
 			return normalizeChanges(result) > 0;
 		},
 
-		async releaseLease(jobId) {
+		async releaseLease(jobRunId) {
 			const result = await params.db
 				.prepare("DELETE FROM job_locks WHERE job_id = ?")
-				.bind(jobId)
+				.bind(jobRunId)
 				.run();
 
 			requireSuccess(result, "release lease");
 		},
 
-		async markRunning({ jobId, now }) {
+		async markQueued({ jobRunId, now }) {
+			const timestamp = now.toISOString();
+			const result = await params.db
+				.prepare(`UPDATE jobs
+SET status = 'queued',
+	updated_at = ?
+WHERE id = ?
+	AND status = 'scheduled'`)
+				.bind(timestamp, jobRunId)
+				.run();
+
+			requireSuccess(result, "mark queued");
+			if (normalizeChanges(result) === 0) {
+				return null;
+			}
+
+			return fetchJobBy(params.db, "id = ?", [jobRunId]);
+		},
+
+		async markRunning({ jobRunId, now }) {
 			const timestamp = now.toISOString();
 			const result = await params.db
 				.prepare(`UPDATE jobs
@@ -314,7 +333,7 @@ SET status = 'running',
 	updated_at = ?
 WHERE id = ?
 	AND status = 'queued'`)
-				.bind(timestamp, timestamp, jobId)
+				.bind(timestamp, timestamp, jobRunId)
 				.run();
 
 			requireSuccess(result, "mark running");
@@ -322,10 +341,10 @@ WHERE id = ?
 				return null;
 			}
 
-			return fetchJobBy(params.db, "id = ?", [jobId]);
+			return fetchJobBy(params.db, "id = ?", [jobRunId]);
 		},
 
-		async markSucceeded({ jobId, now }) {
+		async markSucceeded({ jobRunId, now }) {
 			const timestamp = now.toISOString();
 			const result = await params.db
 				.prepare(`UPDATE jobs
@@ -335,7 +354,7 @@ SET status = 'succeeded',
 	last_error = NULL
 WHERE id = ?
 	AND status = 'running'`)
-				.bind(timestamp, timestamp, jobId)
+				.bind(timestamp, timestamp, jobRunId)
 				.run();
 
 			requireSuccess(result, "mark succeeded");
@@ -343,21 +362,21 @@ WHERE id = ?
 				return null;
 			}
 
-			return fetchJobBy(params.db, "id = ?", [jobId]);
+			return fetchJobBy(params.db, "id = ?", [jobRunId]);
 		},
 
-		async markRetryable({ jobId, now, nextRunAt, error }) {
+		async markRetryable({ jobRunId, now, nextRunAt, error }) {
 			const timestamp = now.toISOString();
 			const result = await params.db
 				.prepare(`UPDATE jobs
-SET status = 'queued',
+SET status = 'scheduled',
 	attempt = attempt + 1,
 	next_run_at = ?,
 	updated_at = ?,
 	last_error = ?
 WHERE id = ?
 	AND status = 'running'`)
-				.bind(nextRunAt.toISOString(), timestamp, error, jobId)
+				.bind(nextRunAt.toISOString(), timestamp, error, jobRunId)
 				.run();
 
 			requireSuccess(result, "mark retryable");
@@ -365,10 +384,10 @@ WHERE id = ?
 				return null;
 			}
 
-			return fetchJobBy(params.db, "id = ?", [jobId]);
+			return fetchJobBy(params.db, "id = ?", [jobRunId]);
 		},
 
-		async markFailed({ jobId, now, error }) {
+		async markFailed({ jobRunId, now, error }) {
 			const timestamp = now.toISOString();
 			const result = await params.db
 				.prepare(`UPDATE jobs
@@ -379,7 +398,7 @@ SET status = 'failed',
 	last_error = ?
 WHERE id = ?
 	AND status IN ('queued', 'running')`)
-				.bind(timestamp, timestamp, error, jobId)
+				.bind(timestamp, timestamp, error, jobRunId)
 				.run();
 
 			requireSuccess(result, "mark failed");
@@ -387,7 +406,7 @@ WHERE id = ?
 				return null;
 			}
 
-			return fetchJobBy(params.db, "id = ?", [jobId]);
+			return fetchJobBy(params.db, "id = ?", [jobRunId]);
 		},
 	};
 }
