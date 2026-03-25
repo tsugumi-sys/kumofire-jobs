@@ -15,6 +15,8 @@ import type {
 const DEFAULT_LEASE_MS = 30_000;
 export const jobMessageVersion = 1 as const;
 
+type StoredJobRun = JobRun & { id: string };
+
 function defaultRetryPolicy(): RetryPolicy {
 	return {
 		maxAttempts: 3,
@@ -44,7 +46,20 @@ function serializeError(error: unknown): string {
 	return String(error);
 }
 
-function toStatusView(jobRun: JobRun): JobRunStatusView {
+function requireJobRunId(jobRun: JobRun): string {
+	if (!jobRun.id) {
+		throw new Error("Job run is missing id");
+	}
+
+	return jobRun.id;
+}
+
+function requireStoredJobRun(jobRun: JobRun): StoredJobRun {
+	const id = requireJobRunId(jobRun);
+	return { ...jobRun, id };
+}
+
+function toStatusView(jobRun: StoredJobRun): JobRunStatusView {
 	return {
 		id: jobRun.id,
 		jobName: jobRun.jobName,
@@ -169,7 +184,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 				);
 
 				if (existingJob) {
-					return { jobId: existingJob.id };
+					return { jobId: requireJobRunId(existingJob) };
 				}
 			}
 
@@ -191,21 +206,22 @@ export function createJobs<THandlers extends JobHandlerMap>(
 				lastError: null,
 				...(input.dedupeKey ? { dedupeKey: input.dedupeKey } : {}),
 			});
+			const storedJobRun = requireStoredJobRun(jobRun);
 
 			if (nextRunAt.getTime() <= now.getTime()) {
 				const queuedJob = await options.storage.markQueued({
-					jobRunId: jobRun.id,
+					jobRunId: storedJobRun.id,
 					now,
 				});
 				if (queuedJob) {
 					await options.queue.send({
 						version: jobMessageVersion,
-						jobRunId: jobRun.id,
+						jobRunId: storedJobRun.id,
 					});
 				}
 			}
 
-			return { jobId: jobRun.id };
+			return { jobId: storedJobRun.id };
 		},
 
 		async dispatch(input?: { limit?: number }): Promise<DispatchResult> {
@@ -220,8 +236,9 @@ export function createJobs<THandlers extends JobHandlerMap>(
 			});
 
 			for (const jobRun of jobRuns) {
+				const storedJobRun = requireStoredJobRun(jobRun);
 				const queuedJob = await options.storage.markQueued({
-					jobRunId: jobRun.id,
+					jobRunId: storedJobRun.id,
 					now,
 				});
 				if (!queuedJob) {
@@ -229,7 +246,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 				}
 				await options.queue.send({
 					version: jobMessageVersion,
-					jobRunId: jobRun.id,
+					jobRunId: storedJobRun.id,
 				});
 			}
 
@@ -250,77 +267,79 @@ export function createJobs<THandlers extends JobHandlerMap>(
 			if (!jobRun || jobRun.status === "canceled") {
 				return { outcome: "ignored", jobRunId: message.jobRunId };
 			}
+			const storedJobRun = requireStoredJobRun(jobRun);
 
 			const acquired = await options.storage.acquireLease({
-				jobRunId: jobRun.id,
+				jobRunId: storedJobRun.id,
 				now,
 				leaseMs,
 			});
 
 			if (!acquired) {
-				return { outcome: "ignored", jobRunId: jobRun.id };
+				return { outcome: "ignored", jobRunId: storedJobRun.id };
 			}
 
 			try {
 				const runningJob = await options.storage.markRunning({
-					jobRunId: jobRun.id,
+					jobRunId: storedJobRun.id,
 					now,
 				});
 
 				if (!runningJob) {
-					return { outcome: "ignored", jobRunId: jobRun.id };
+					return { outcome: "ignored", jobRunId: storedJobRun.id };
 				}
+				const storedRunningJob = requireStoredJobRun(runningJob);
 
-				const handler = options.handlers[runningJob.jobName];
-				const definition = await resolveDefinitionForRun(runningJob);
+				const handler = options.handlers[storedRunningJob.jobName];
+				const definition = await resolveDefinitionForRun(storedRunningJob);
 
 				if (!handler) {
-					const missingHandlerError = `Missing handler for job "${runningJob.jobName}"`;
+					const missingHandlerError = `Missing handler for job "${storedRunningJob.jobName}"`;
 					await options.storage.markFailed({
-						jobRunId: runningJob.id,
+						jobRunId: storedRunningJob.id,
 						now,
 						error: missingHandlerError,
 					});
-					return { outcome: "failed", jobRunId: runningJob.id };
+					return { outcome: "failed", jobRunId: storedRunningJob.id };
 				}
 
 				try {
-					await handler({ definition, job: runningJob, now });
+					await handler({ definition, job: storedRunningJob, now });
 					await options.storage.markSucceeded({
-						jobRunId: runningJob.id,
+						jobRunId: storedRunningJob.id,
 						now,
 					});
-					return { outcome: "succeeded", jobRunId: runningJob.id };
+					return { outcome: "succeeded", jobRunId: storedRunningJob.id };
 				} catch (error) {
 					const errorMessage = serializeError(error);
-					const nextAttempt = runningJob.attempt + 1;
+					const nextAttempt = storedRunningJob.attempt + 1;
 
-					if (nextAttempt < runningJob.maxAttempts) {
+					if (nextAttempt < storedRunningJob.maxAttempts) {
 						const nextRunAt = retry.getNextRunAt({
 							attempt: nextAttempt,
 							error,
-							job: runningJob,
+							job: storedRunningJob,
 							now,
 						});
 
 						await options.storage.markRetryable({
-							jobRunId: runningJob.id,
+							jobRunId: storedRunningJob.id,
 							now,
 							nextRunAt,
 							error: errorMessage,
 						});
-						return { outcome: "retried", jobRunId: runningJob.id };
+						return { outcome: "retried", jobRunId: storedRunningJob.id };
 					}
 
 					await options.storage.markFailed({
-						jobRunId: runningJob.id,
+						jobRunId: storedRunningJob.id,
 						now,
 						error: errorMessage,
 					});
-					return { outcome: "failed", jobRunId: runningJob.id };
+					return { outcome: "failed", jobRunId: storedRunningJob.id };
 				}
 			} finally {
-				await options.storage.releaseLease(jobRun.id);
+				await options.storage.releaseLease(storedJobRun.id);
 			}
 		},
 
@@ -329,7 +348,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 			await ensureDefinitions();
 
 			const jobRun = await options.storage.getRun(jobId);
-			return jobRun ? toStatusView(jobRun) : null;
+			return jobRun ? toStatusView(requireStoredJobRun(jobRun)) : null;
 		},
 	};
 }

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+	CloudflareQueue,
 	D1Database,
 	D1PreparedStatement,
+	D1RunMeta,
 	D1RunResult,
 } from "./cloudflare";
 import {
@@ -61,18 +63,36 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 		return this;
 	}
 
-	first<T>(): Promise<T | null> {
+	first<T>(columnName?: string): Promise<T | null> {
+		if (columnName) {
+			throw new Error(
+				`Column selection is not supported in tests: ${columnName}`,
+			);
+		}
+
 		return Promise.resolve(this.database.first<T>(this.query, this.values));
 	}
 
-	run(): Promise<D1RunResult> {
-		return Promise.resolve(this.database.run(this.query, this.values));
+	run<T = Record<string, unknown>>(): Promise<D1RunResult<T>> {
+		return Promise.resolve(this.database.run<T>(this.query, this.values));
 	}
 
-	all<T>(): Promise<{ results: T[] }> {
-		return Promise.resolve({
-			results: this.database.all<T>(this.query, this.values),
-		});
+	all<T = Record<string, unknown>>(): Promise<D1RunResult<T>> {
+		return Promise.resolve(this.database.allResult<T>(this.query, this.values));
+	}
+
+	raw<T = unknown[]>(options?: { columnNames?: false }): Promise<T[]>;
+	raw<T = unknown[]>(options: {
+		columnNames: true;
+	}): Promise<[string[], ...T[]]>;
+	raw<T = unknown[]>(options?: {
+		columnNames?: boolean;
+	}): Promise<T[] | [string[], ...T[]]> {
+		if (options?.columnNames) {
+			return Promise.resolve([[]] as [string[], ...T[]]);
+		}
+
+		return Promise.resolve([] as T[]);
 	}
 }
 
@@ -86,6 +106,24 @@ class FakeD1Database implements D1Database {
 
 	prepare(query: string): D1PreparedStatement {
 		return new FakeD1PreparedStatement(this, query);
+	}
+
+	batch<T = unknown>(
+		_statements: D1PreparedStatement[],
+	): Promise<D1RunResult<T>[]> {
+		return Promise.resolve([]);
+	}
+
+	exec(_query: string): Promise<{ count: number; duration: number }> {
+		return Promise.resolve({ count: 0, duration: 0 });
+	}
+
+	withSession(): ReturnType<D1Database["withSession"]> {
+		return this as unknown as ReturnType<D1Database["withSession"]>;
+	}
+
+	dump(): Promise<ArrayBuffer> {
+		return Promise.resolve(new ArrayBuffer(0));
 	}
 
 	first<T>(query: string, values: unknown[]): T | null {
@@ -145,7 +183,7 @@ class FakeD1Database implements D1Database {
 		throw new Error(`Unsupported first() query: ${normalized}`);
 	}
 
-	all<T>(query: string, values: unknown[]): T[] {
+	allRows<T>(query: string, values: unknown[]): T[] {
 		const normalized = normalizeSql(query);
 		if (!normalized.includes("FROM job_runs WHERE status = 'scheduled'")) {
 			throw new Error(`Unsupported all() query: ${normalized}`);
@@ -169,7 +207,18 @@ class FakeD1Database implements D1Database {
 			.map((jobRun) => ({ ...jobRun }) as T);
 	}
 
-	run(query: string, values: unknown[]): D1RunResult {
+	allResult<T>(query: string, values: unknown[]): D1RunResult<T> {
+		return {
+			success: true,
+			meta: createD1Meta(),
+			results: this.allRows<T>(query, values),
+		};
+	}
+
+	run<T = Record<string, unknown>>(
+		query: string,
+		values: unknown[],
+	): D1RunResult<T> {
 		const normalized = normalizeSql(query);
 
 		if (normalized.startsWith("INSERT INTO job_definitions")) {
@@ -184,7 +233,11 @@ class FakeD1Database implements D1Database {
 			] = values;
 
 			if (this.definitions.has(String(id))) {
-				return { success: true, meta: { changes: 0 } };
+				return {
+					success: true,
+					meta: createD1Meta({ changes: 0 }),
+					results: [],
+				};
 			}
 
 			const row: StoredDefinitionRow = {
@@ -198,7 +251,7 @@ class FakeD1Database implements D1Database {
 			};
 			this.definitions.set(row.id, row);
 			this.definitionsByName.set(row.name, row.id);
-			return { success: true, meta: { changes: 1 } };
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
 		if (normalized.startsWith("INSERT INTO job_runs")) {
@@ -236,7 +289,7 @@ class FakeD1Database implements D1Database {
 				last_error: asNullableString(lastError),
 			});
 
-			return { success: true, meta: { changes: 1 } };
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
 		if (normalized.startsWith("INSERT INTO job_locks")) {
@@ -244,62 +297,82 @@ class FakeD1Database implements D1Database {
 			const existing = this.locks.get(String(jobRunId));
 
 			if (existing && existing.leaseUntil > String(now)) {
-				return { success: true, meta: { changes: 0 } };
+				return {
+					success: true,
+					meta: createD1Meta({ changes: 0 }),
+					results: [],
+				};
 			}
 
 			this.locks.set(String(jobRunId), { leaseUntil: String(leaseUntil) });
-			return { success: true, meta: { changes: 1 } };
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
 		if (normalized.startsWith("DELETE FROM job_locks")) {
 			this.locks.delete(String(values[0]));
-			return { success: true, meta: { changes: 1 } };
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
 		if (normalized.includes("UPDATE job_runs SET status = 'queued'")) {
 			const [updatedAt, jobRunId] = values;
 			const jobRun = this.jobRuns.get(String(jobRunId));
 			if (!jobRun || jobRun.status !== "scheduled") {
-				return { success: true, meta: { changes: 0 } };
+				return {
+					success: true,
+					meta: createD1Meta({ changes: 0 }),
+					results: [],
+				};
 			}
 
 			jobRun.status = "queued";
 			jobRun.updated_at = String(updatedAt);
-			return { success: true, meta: { changes: 1 } };
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
 		if (normalized.includes("UPDATE job_runs SET status = 'running'")) {
 			const [startedAt, updatedAt, jobRunId] = values;
 			const jobRun = this.jobRuns.get(String(jobRunId));
 			if (!jobRun || jobRun.status !== "queued") {
-				return { success: true, meta: { changes: 0 } };
+				return {
+					success: true,
+					meta: createD1Meta({ changes: 0 }),
+					results: [],
+				};
 			}
 
 			jobRun.status = "running";
 			jobRun.started_at = String(startedAt);
 			jobRun.updated_at = String(updatedAt);
-			return { success: true, meta: { changes: 1 } };
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
 		if (normalized.includes("UPDATE job_runs SET status = 'succeeded'")) {
 			const [finishedAt, updatedAt, jobRunId] = values;
 			const jobRun = this.jobRuns.get(String(jobRunId));
 			if (!jobRun || jobRun.status !== "running") {
-				return { success: true, meta: { changes: 0 } };
+				return {
+					success: true,
+					meta: createD1Meta({ changes: 0 }),
+					results: [],
+				};
 			}
 
 			jobRun.status = "succeeded";
 			jobRun.finished_at = String(finishedAt);
 			jobRun.updated_at = String(updatedAt);
 			jobRun.last_error = null;
-			return { success: true, meta: { changes: 1 } };
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
 		if (normalized.includes("UPDATE job_runs SET status = 'scheduled'")) {
 			const [nextRunAt, updatedAt, error, jobRunId] = values;
 			const jobRun = this.jobRuns.get(String(jobRunId));
 			if (!jobRun || jobRun.status !== "running") {
-				return { success: true, meta: { changes: 0 } };
+				return {
+					success: true,
+					meta: createD1Meta({ changes: 0 }),
+					results: [],
+				};
 			}
 
 			jobRun.status = "scheduled";
@@ -307,7 +380,7 @@ class FakeD1Database implements D1Database {
 			jobRun.next_run_at = String(nextRunAt);
 			jobRun.updated_at = String(updatedAt);
 			jobRun.last_error = String(error);
-			return { success: true, meta: { changes: 1 } };
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
 		if (normalized.includes("UPDATE job_runs SET status = 'failed'")) {
@@ -317,7 +390,11 @@ class FakeD1Database implements D1Database {
 				!jobRun ||
 				(jobRun.status !== "queued" && jobRun.status !== "running")
 			) {
-				return { success: true, meta: { changes: 0 } };
+				return {
+					success: true,
+					meta: createD1Meta({ changes: 0 }),
+					results: [],
+				};
 			}
 
 			jobRun.status = "failed";
@@ -325,7 +402,7 @@ class FakeD1Database implements D1Database {
 			jobRun.finished_at = String(finishedAt);
 			jobRun.updated_at = String(updatedAt);
 			jobRun.last_error = String(error);
-			return { success: true, meta: { changes: 1 } };
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
 		throw new Error(`Unsupported run() query: ${normalized}`);
@@ -373,6 +450,32 @@ function asNullableString(value: unknown): string | null {
 	return value == null ? null : String(value);
 }
 
+function createD1Meta(overrides?: Partial<D1RunMeta>): D1RunMeta {
+	return {
+		duration: 0,
+		size_after: 0,
+		rows_read: 0,
+		rows_written: 0,
+		last_row_id: 0,
+		changed_db: false,
+		changes: 0,
+		...overrides,
+	};
+}
+
+function createQueueBinding<TMessage>(
+	send: (message: TMessage) => Promise<void>,
+): CloudflareQueue<TMessage> {
+	return {
+		send,
+		async sendBatch(messages) {
+			for (const message of messages) {
+				await send(message.body);
+			}
+		},
+	};
+}
+
 function createAckableMessage(body: unknown) {
 	return {
 		body,
@@ -401,9 +504,7 @@ describe("cloudflare adapters", () => {
 		const db = new FakeD1Database();
 		const jobs = createJobs({
 			storage: createD1StorageAdapter({ db }),
-			queue: createCloudflareQueueAdapter({
-				send: async () => {},
-			}),
+			queue: createCloudflareQueueAdapter(createQueueBinding(async () => {})),
 			handlers: {
 				email: () => {},
 			},
@@ -427,11 +528,11 @@ describe("cloudflare adapters", () => {
 		const queueMessages: JobRunMessage[] = [];
 		const jobs = createJobs({
 			storage: createD1StorageAdapter({ db }),
-			queue: createCloudflareQueueAdapter({
-				send: async (message) => {
+			queue: createCloudflareQueueAdapter(
+				createQueueBinding(async (message) => {
 					queueMessages.push(message);
-				},
-			}),
+				}),
+			),
 			now: () => now,
 			handlers: {
 				email: () => {},
@@ -471,11 +572,11 @@ describe("cloudflare adapters", () => {
 		const queueMessages: JobRunMessage[] = [];
 		const jobs = createJobs({
 			storage: createD1StorageAdapter({ db }),
-			queue: createCloudflareQueueAdapter({
-				send: async (message) => {
+			queue: createCloudflareQueueAdapter(
+				createQueueBinding(async (message) => {
 					queueMessages.push(message);
-				},
-			}),
+				}),
+			),
 			now: () => now,
 			handlers: {
 				email: () => {},
@@ -503,11 +604,11 @@ describe("cloudflare adapters", () => {
 		const queueMessages: JobRunMessage[] = [];
 		const jobs = createJobs({
 			storage: createD1StorageAdapter({ db }),
-			queue: createCloudflareQueueAdapter({
-				send: async (message) => {
+			queue: createCloudflareQueueAdapter(
+				createQueueBinding(async (message) => {
 					queueMessages.push(message);
-				},
-			}),
+				}),
+			),
 			now: () => now,
 			handlers: {
 				email: () => {},
@@ -541,11 +642,11 @@ describe("cloudflare adapters", () => {
 		const queueMessages: JobRunMessage[] = [];
 		const jobs = createJobs({
 			storage: createD1StorageAdapter({ db }),
-			queue: createCloudflareQueueAdapter({
-				send: async (message) => {
+			queue: createCloudflareQueueAdapter(
+				createQueueBinding(async (message) => {
 					queueMessages.push(message);
-				},
-			}),
+				}),
+			),
 			now: () => now,
 			handlers: {
 				email: () => {},
@@ -578,11 +679,11 @@ describe("cloudflare adapters", () => {
 		let shouldFail = true;
 		const jobs = createJobs({
 			storage: createD1StorageAdapter({ db }),
-			queue: createCloudflareQueueAdapter({
-				send: async (message) => {
+			queue: createCloudflareQueueAdapter(
+				createQueueBinding(async (message) => {
 					queueMessages.push(message);
-				},
-			}),
+				}),
+			),
 			now: () => now,
 			retry: {
 				maxAttempts: 3,
@@ -665,11 +766,11 @@ describe("cloudflare adapters", () => {
 		const queueMessages: JobRunMessage[] = [];
 		const jobs = createJobs({
 			storage: createD1StorageAdapter({ db }),
-			queue: createCloudflareQueueAdapter({
-				send: async (message) => {
+			queue: createCloudflareQueueAdapter(
+				createQueueBinding(async (message) => {
 					queueMessages.push(message);
-				},
-			}),
+				}),
+			),
 			now: () => now,
 			handlers: {
 				email: () => {},
@@ -697,9 +798,7 @@ describe("cloudflare adapters", () => {
 		const db = new FakeD1Database(0);
 		const jobs = createJobs({
 			storage: createD1StorageAdapter({ db }),
-			queue: createCloudflareQueueAdapter({
-				send: async () => {},
-			}),
+			queue: createCloudflareQueueAdapter(createQueueBinding(async () => {})),
 			handlers: {
 				email: () => {},
 			},
@@ -729,11 +828,9 @@ describe("cloudflare runtime", () => {
 		});
 		const resources = {
 			db,
-			queue: {
-				send: async (message: JobRunMessage) => {
-					queueMessages.push(message);
-				},
-			},
+			queue: createQueueBinding(async (message: JobRunMessage) => {
+				queueMessages.push(message);
+			}),
 		};
 
 		const jobs = runtime.bind(resources);
@@ -771,7 +868,7 @@ describe("cloudflare runtime", () => {
 		};
 		const resources = {
 			db: workerEnv.JOBS_DB,
-			queue: workerEnv.JOBS_QUEUE,
+			queue: createQueueBinding(workerEnv.JOBS_QUEUE.send),
 		};
 
 		const jobs = runtime.bind(resources);
@@ -798,9 +895,7 @@ describe("cloudflare runtime", () => {
 		});
 		const resources = {
 			db,
-			queue: {
-				send: async () => {},
-			},
+			queue: createQueueBinding(async () => {}),
 		};
 		const jobs = runtime.bind(resources);
 		const { jobId } = await jobs.create({
@@ -819,10 +914,20 @@ describe("cloudflare runtime", () => {
 				prepare() {
 					throw new Error("db unavailable");
 				},
-			},
-			queue: {
-				send: async () => {},
-			},
+				batch() {
+					return Promise.resolve([]);
+				},
+				exec() {
+					return Promise.resolve({ count: 0, duration: 0 });
+				},
+				withSession() {
+					throw new Error("db unavailable");
+				},
+				dump() {
+					return Promise.resolve(new ArrayBuffer(0));
+				},
+			} as D1Database,
+			queue: createQueueBinding(async () => {}),
 		};
 		const brokenRuntime = createCloudflareRuntime({
 			handlers: {

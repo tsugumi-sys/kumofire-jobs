@@ -6,9 +6,11 @@ import type {
 	JobStorageAdapter,
 } from "./protocol";
 
+type StoredJobRun = JobRun & { id: string };
+
 export interface InMemoryStorageAdapter extends JobStorageAdapter {
 	seedDefinition(definition: JobDefinition): Promise<void>;
-	seed(jobRun: JobRun): Promise<void>;
+	seed(jobRun: StoredJobRun): Promise<void>;
 }
 
 export interface InMemoryQueueAdapter extends JobQueueAdapter {
@@ -19,7 +21,7 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 	let sequence = 0;
 	const definitions = new Map<string, JobDefinition>();
 	const definitionsByName = new Map<string, string>();
-	const jobRuns = new Map<string, JobRun>();
+	const jobRuns = new Map<string, StoredJobRun>();
 	const dedupeIndex = new Map<string, string>();
 	const locks = new Map<string, { leaseUntil: number }>();
 
@@ -81,7 +83,7 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 				}
 			}
 
-			const createdJobRun: JobRun = {
+			const createdJobRun: StoredJobRun = {
 				...jobRun,
 				id: generateRunId(),
 			};
@@ -142,7 +144,7 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 				return null;
 			}
 
-			const updated: JobRun = {
+			const updated: StoredJobRun = {
 				...jobRun,
 				status: "queued",
 				updatedAt: now.toISOString(),
@@ -157,7 +159,7 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 				return null;
 			}
 
-			const updated: JobRun = {
+			const updated: StoredJobRun = {
 				...jobRun,
 				status: "running",
 				startedAt: now.toISOString(),
@@ -173,7 +175,7 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 				return null;
 			}
 
-			const updated: JobRun = {
+			const updated: StoredJobRun = {
 				...jobRun,
 				status: "succeeded",
 				finishedAt: now.toISOString(),
@@ -190,7 +192,7 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 				return null;
 			}
 
-			const updated: JobRun = {
+			const updated: StoredJobRun = {
 				...jobRun,
 				status: "scheduled",
 				attempt: jobRun.attempt + 1,
@@ -211,7 +213,7 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 				return null;
 			}
 
-			const updated: JobRun = {
+			const updated: StoredJobRun = {
 				...jobRun,
 				status: "failed",
 				attempt: jobRun.attempt + 1,
