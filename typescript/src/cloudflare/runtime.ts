@@ -1,17 +1,17 @@
-import {
-	type CloudflareQueue,
-	createCloudflareQueueAdapter,
-	createD1StorageAdapter,
-	type D1Database,
-} from "./cloudflare";
-import { createJobs } from "./core";
+import { createJobs } from "../core";
 import type {
 	ConsumeResult,
 	CreateJobsOptions,
 	DispatchResult,
 	JobHandlerMap,
 	JobRunMessage,
-} from "./protocol";
+} from "../protocol";
+import {
+	type CloudflareQueue,
+	createCloudflareQueueAdapter,
+	createD1StorageAdapter,
+	type D1Database,
+} from "./index";
 
 export interface CloudflareQueueMessage<TBody = unknown> {
 	body: TBody;

@@ -18,8 +18,8 @@ export type {
 	CloudflareQueueMessage,
 	CloudflareRuntimeResources,
 	CreateCloudflareRuntimeOptions,
-} from "./cloudflare-runtime";
-export { createCloudflareRuntime } from "./cloudflare-runtime";
+} from "./cloudflare/runtime";
+export { createCloudflareRuntime } from "./cloudflare/runtime";
 export { createJobs, jobMessageVersion } from "./core";
 export type { InMemoryQueueAdapter, InMemoryStorageAdapter } from "./in-memory";
 export {

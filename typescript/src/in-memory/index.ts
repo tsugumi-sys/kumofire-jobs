@@ -4,7 +4,7 @@ import type {
 	JobRun,
 	JobRunMessage,
 	JobStorageAdapter,
-} from "./protocol";
+} from "../protocol";
 
 type StoredJobRun = JobRun & { id: string };
 

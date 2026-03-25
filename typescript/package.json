@@ -17,11 +17,12 @@
 		"sql"
 	],
 	"scripts": {
-		"build": "tsdown src/index.ts --format esm --dts",
+		"sync:schema": "node scripts/sync-sqlite-schema.mjs",
+		"build": "pnpm run sync:schema && tsdown src/index.ts --format esm --dts",
 		"test": "vitest run",
 		"lint": "biome check .",
 		"format": "biome format --write .",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "pnpm run sync:schema && tsc --noEmit"
 	},
 	"keywords": [
 		"cloudflare",
