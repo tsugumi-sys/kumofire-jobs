@@ -1,0 +1,1 @@
+{"version":3,"file":"index.mjs","names":[],"sources":["../src/index.ts"],"sourcesContent":["export function hello(): string {\n\treturn \"hello kumofire/jobs!\";\n}\n"],"mappings":";AAAA,SAAgB,QAAgB;AAC/B,QAAO"}

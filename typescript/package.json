@@ -1,0 +1,50 @@
+{
+  "name": "@kumofire/jobs",
+  "version": "0.1.0",
+  "description": "A job processing library for Cloudflare Workers.",
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run",
+    "lint": "biome check .",
+    "format": "biome format --write ."
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "jobs",
+    "queue"
+  ],
+  "author": "tsugumi-sys <tidemark0105@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tsugumi-sys/kumofire-jobs.git",
+    "directory": "typescript"
+  },
+  "homepage": "https://github.com/tsugumi-sys/kumofire-jobs/tree/main/typescript",
+  "bugs": {
+    "url": "https://github.com/tsugumi-sys/kumofire-jobs/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "pnpm@10.32.1",
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
+    "tsdown": "^0.21.4",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.1"
+  }
+}
