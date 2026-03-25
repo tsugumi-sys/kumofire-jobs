@@ -336,9 +336,32 @@ class FakeD1Database implements D1Database {
 		return definition ? { ...definition } : null;
 	}
 
+	deleteDefinition(id: string): void {
+		const definition = this.definitions.get(id);
+		if (!definition) {
+			return;
+		}
+
+		this.definitions.delete(id);
+		this.definitionsByName.delete(definition.name);
+	}
+
 	getJobRun(id: string): StoredJobRunRow | null {
 		const jobRun = this.jobRuns.get(id);
 		return jobRun ? { ...jobRun } : null;
+	}
+
+	seedDefinition(definition: StoredDefinitionRow): void {
+		this.definitions.set(definition.id, { ...definition });
+		this.definitionsByName.set(definition.name, definition.id);
+	}
+
+	seedJobRun(jobRun: StoredJobRunRow): void {
+		this.jobRuns.set(jobRun.id, { ...jobRun });
+	}
+
+	seedLock(jobRunId: string, leaseUntil: string): void {
+		this.locks.set(jobRunId, { leaseUntil });
 	}
 }
 
@@ -472,6 +495,202 @@ describe("cloudflare adapters", () => {
 
 		expect(second).toEqual(first);
 		expect(queueMessages).toHaveLength(1);
+	});
+
+	it("ignores consume when a lease is already held", async () => {
+		const now = new Date("2026-03-25T00:00:00.000Z");
+		const db = new FakeD1Database();
+		const queueMessages: JobRunMessage[] = [];
+		const jobs = createJobs({
+			storage: createD1StorageAdapter({ db }),
+			queue: createCloudflareQueueAdapter({
+				send: async (message) => {
+					queueMessages.push(message);
+				},
+			}),
+			now: () => now,
+			handlers: {
+				email: () => {},
+			},
+		});
+
+		const { jobId } = await jobs.create({
+			name: "email",
+			payload: { to: "user@example.com" },
+		});
+		db.seedLock(jobId, "2026-03-25T00:10:00.000Z");
+
+		const message = queueMessages[0];
+		if (!message) {
+			throw new Error("expected a queue message");
+		}
+
+		await expect(jobs.consume(message)).resolves.toEqual({
+			outcome: "ignored",
+			jobRunId: jobId,
+		});
+		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
+			status: "queued",
+			attempt: 0,
+		});
+	});
+
+	it("ignores duplicate consume after the first execution succeeds", async () => {
+		const now = new Date("2026-03-25T00:00:00.000Z");
+		const db = new FakeD1Database();
+		const queueMessages: JobRunMessage[] = [];
+		const jobs = createJobs({
+			storage: createD1StorageAdapter({ db }),
+			queue: createCloudflareQueueAdapter({
+				send: async (message) => {
+					queueMessages.push(message);
+				},
+			}),
+			now: () => now,
+			handlers: {
+				email: () => {},
+			},
+		});
+
+		const { jobId } = await jobs.create({
+			name: "email",
+			payload: { to: "user@example.com" },
+		});
+		const message = queueMessages[0];
+		if (!message) {
+			throw new Error("expected a queue message");
+		}
+
+		await expect(jobs.consume(message)).resolves.toEqual({
+			outcome: "succeeded",
+			jobRunId: jobId,
+		});
+		await expect(jobs.consume(message)).resolves.toEqual({
+			outcome: "ignored",
+			jobRunId: jobId,
+		});
+	});
+
+	it("reschedules retryable failures with the next run time", async () => {
+		let now = new Date("2026-03-25T00:00:00.000Z");
+		const db = new FakeD1Database();
+		const queueMessages: JobRunMessage[] = [];
+		let shouldFail = true;
+		const jobs = createJobs({
+			storage: createD1StorageAdapter({ db }),
+			queue: createCloudflareQueueAdapter({
+				send: async (message) => {
+					queueMessages.push(message);
+				},
+			}),
+			now: () => now,
+			retry: {
+				maxAttempts: 3,
+				getNextRunAt: ({ now: currentNow }) =>
+					new Date(currentNow.getTime() + 15_000),
+			},
+			handlers: {
+				email: () => {
+					if (shouldFail) {
+						shouldFail = false;
+						throw new Error("temporary failure");
+					}
+				},
+			},
+		});
+
+		const { jobId } = await jobs.create({
+			name: "email",
+			payload: { to: "user@example.com" },
+		});
+		const message = queueMessages[0];
+		if (!message) {
+			throw new Error("expected a queue message");
+		}
+
+		await expect(jobs.consume(message)).resolves.toEqual({
+			outcome: "retried",
+			jobRunId: jobId,
+		});
+		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
+			status: "scheduled",
+			attempt: 1,
+			lastError: "temporary failure",
+			scheduledFor: "2026-03-25T00:00:15.000Z",
+		});
+
+		now = new Date("2026-03-25T00:00:15.000Z");
+		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
+		expect(queueMessages).toEqual([
+			{ version: 1, jobRunId: jobId },
+			{ version: 1, jobRunId: jobId },
+		]);
+	});
+
+	it("surfaces malformed stored payload rows from D1", async () => {
+		const db = new FakeD1Database();
+		db.seedDefinition({
+			id: "email",
+			name: "email",
+			handler: "email",
+			payload_template: null,
+			default_options: null,
+			created_at: "1970-01-01T00:00:00.000Z",
+			updated_at: "1970-01-01T00:00:00.000Z",
+		});
+		db.seedJobRun({
+			id: "job_run_1",
+			job_id: "email",
+			job_name: "email",
+			status: "queued",
+			dedupe_key: null,
+			payload: "{invalid-json",
+			attempt: 0,
+			max_attempts: 3,
+			next_run_at: "2026-03-25T00:00:00.000Z",
+			created_at: "2026-03-25T00:00:00.000Z",
+			updated_at: "2026-03-25T00:00:00.000Z",
+			started_at: null,
+			finished_at: null,
+			last_error: null,
+		});
+		const storage = createD1StorageAdapter({ db });
+
+		await expect(storage.getRun("job_run_1")).rejects.toThrow();
+	});
+
+	it("falls back to in-memory definitions when the D1 definition row is missing", async () => {
+		const now = new Date("2026-03-25T00:00:00.000Z");
+		const db = new FakeD1Database();
+		const queueMessages: JobRunMessage[] = [];
+		const jobs = createJobs({
+			storage: createD1StorageAdapter({ db }),
+			queue: createCloudflareQueueAdapter({
+				send: async (message) => {
+					queueMessages.push(message);
+				},
+			}),
+			now: () => now,
+			handlers: {
+				email: () => {},
+			},
+		});
+
+		const { jobId } = await jobs.create({
+			name: "email",
+			payload: { to: "user@example.com" },
+		});
+		db.deleteDefinition("email");
+
+		const message = queueMessages[0];
+		if (!message) {
+			throw new Error("expected a queue message");
+		}
+
+		await expect(jobs.consume(message)).resolves.toEqual({
+			outcome: "succeeded",
+			jobRunId: jobId,
+		});
 	});
 
 	it("fails fast when the D1 schema version is too old", async () => {

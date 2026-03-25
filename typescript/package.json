@@ -20,7 +20,8 @@
 		"build": "tsdown src/index.ts --format esm --dts",
 		"test": "vitest run",
 		"lint": "biome check .",
-		"format": "biome format --write ."
+		"format": "biome format --write .",
+		"typecheck": "tsc --noEmit"
 	},
 	"keywords": [
 		"cloudflare",
