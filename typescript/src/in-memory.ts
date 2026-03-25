@@ -1,4 +1,5 @@
 import type {
+	JobDefinition,
 	JobQueueAdapter,
 	JobRun,
 	JobRunMessage,
@@ -6,6 +7,7 @@ import type {
 } from "./protocol";
 
 export interface InMemoryStorageAdapter extends JobStorageAdapter {
+	seedDefinition(definition: JobDefinition): Promise<void>;
 	seed(jobRun: JobRun): Promise<void>;
 }
 
@@ -14,16 +16,58 @@ export interface InMemoryQueueAdapter extends JobQueueAdapter {
 }
 
 export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
+	let sequence = 0;
+	const definitions = new Map<string, JobDefinition>();
+	const definitionsByName = new Map<string, string>();
 	const jobRuns = new Map<string, JobRun>();
 	const dedupeIndex = new Map<string, string>();
 	const locks = new Map<string, { leaseUntil: number }>();
 
+	function generateRunId(): string {
+		sequence += 1;
+		return `job_run_${sequence}`;
+	}
+
 	return {
+		async seedDefinition(definition) {
+			definitions.set(definition.id, { ...definition });
+			definitionsByName.set(definition.name, definition.id);
+		},
+
 		async seed(jobRun) {
 			jobRuns.set(jobRun.id, { ...jobRun });
 			if (jobRun.dedupeKey) {
 				dedupeIndex.set(jobRun.dedupeKey, jobRun.id);
 			}
+		},
+
+		async createDefinition(definition) {
+			const existingId = definitionsByName.get(definition.name);
+			if (existingId) {
+				const existingDefinition = definitions.get(existingId);
+				if (existingDefinition) {
+					return { ...existingDefinition };
+				}
+			}
+
+			definitions.set(definition.id, { ...definition });
+			definitionsByName.set(definition.name, definition.id);
+			return { ...definition };
+		},
+
+		async getDefinition(jobId) {
+			const definition = definitions.get(jobId);
+			return definition ? { ...definition } : null;
+		},
+
+		async getDefinitionByName(jobName) {
+			const definitionId = definitionsByName.get(jobName);
+			if (!definitionId) {
+				return null;
+			}
+
+			const definition = definitions.get(definitionId);
+			return definition ? { ...definition } : null;
 		},
 
 		async createRun(jobRun) {
@@ -35,11 +79,19 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 						return { ...existingJob };
 					}
 				}
-				dedupeIndex.set(jobRun.dedupeKey, jobRun.id);
 			}
 
-			jobRuns.set(jobRun.id, { ...jobRun });
-			return { ...jobRun };
+			const createdJobRun: JobRun = {
+				...jobRun,
+				id: generateRunId(),
+			};
+
+			if (createdJobRun.dedupeKey) {
+				dedupeIndex.set(createdJobRun.dedupeKey, createdJobRun.id);
+			}
+
+			jobRuns.set(createdJobRun.id, createdJobRun);
+			return { ...createdJobRun };
 		},
 
 		async getRun(jobRunId) {

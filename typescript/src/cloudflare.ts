@@ -104,6 +104,7 @@ interface D1JobRow {
 function mapJobRow(row: D1JobRow): JobRun {
 	return {
 		id: row.id,
+		jobId: row.name,
 		jobName: row.name,
 		status: row.status,
 		payload: JSON.parse(row.payload) as JsonValue,
@@ -189,6 +190,12 @@ export function createD1StorageAdapter(params: {
 	requiredSchemaVersion?: number;
 }): JobStorageAdapter {
 	const schemaVersion = params.requiredSchemaVersion ?? requiredSchemaVersion;
+	let sequence = 0;
+
+	function generateRunId(): string {
+		sequence += 1;
+		return `job_run_${sequence}`;
+	}
 
 	return {
 		async verifySchemaVersion() {
@@ -207,6 +214,11 @@ export function createD1StorageAdapter(params: {
 		},
 
 		async createRun(jobRun) {
+			const createdJobRun: JobRun = {
+				...jobRun,
+				id: generateRunId(),
+			};
+
 			const result = await params.db
 				.prepare(`INSERT INTO jobs (
 	id,
@@ -224,24 +236,24 @@ export function createD1StorageAdapter(params: {
 	last_error
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 				.bind(
-					jobRun.id,
-					jobRun.jobName,
-					jobRun.status,
-					jobRun.dedupeKey ?? null,
-					serializePayload(jobRun.payload),
-					jobRun.attempt,
-					jobRun.maxAttempts,
-					jobRun.scheduledFor,
-					jobRun.createdAt,
-					jobRun.updatedAt,
-					jobRun.startedAt,
-					jobRun.finishedAt,
-					jobRun.lastError,
+					createdJobRun.id,
+					createdJobRun.jobName,
+					createdJobRun.status,
+					createdJobRun.dedupeKey ?? null,
+					serializePayload(createdJobRun.payload),
+					createdJobRun.attempt,
+					createdJobRun.maxAttempts,
+					createdJobRun.scheduledFor,
+					createdJobRun.createdAt,
+					createdJobRun.updatedAt,
+					createdJobRun.startedAt,
+					createdJobRun.finishedAt,
+					createdJobRun.lastError,
 				)
 				.run();
 
 			requireSuccess(result, "insert");
-			return jobRun;
+			return createdJobRun;
 		},
 
 		getRun(jobRunId) {

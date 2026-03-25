@@ -31,6 +31,12 @@ describe("createJobs", () => {
 			status: "queued",
 			attempt: 0,
 		});
+		await expect(storage.getRun(result.jobId)).resolves.toMatchObject({
+			id: result.jobId,
+			jobId: "email",
+			jobName: "email",
+			status: "queued",
+		});
 	});
 
 	it("creates a future run as scheduled until dispatch() enqueues it", async () => {
@@ -69,12 +75,15 @@ describe("createJobs", () => {
 		const now = new Date("2026-03-25T00:00:00.000Z");
 		const storage = createInMemoryStorageAdapter();
 		const queue = createInMemoryQueueAdapter();
+		let observedDefinitionId: string | null = null;
 		const jobs = createJobs({
 			storage,
 			queue,
 			now: () => now,
 			handlers: {
-				email: () => {},
+				email: ({ definition }) => {
+					observedDefinitionId = definition.id;
+				},
 			},
 		});
 
@@ -96,6 +105,7 @@ describe("createJobs", () => {
 			attempt: 0,
 			lastError: null,
 		});
+		expect(observedDefinitionId).toBe("email");
 	});
 
 	it("moves a failed run back to scheduled when retries remain", async () => {

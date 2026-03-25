@@ -3,6 +3,7 @@ import type {
 	CreateJobInput,
 	CreateJobsOptions,
 	DispatchResult,
+	JobDefinition,
 	JobHandlerMap,
 	JobRun,
 	JobRunMessage,
@@ -13,15 +14,6 @@ import type {
 
 const DEFAULT_LEASE_MS = 30_000;
 const MESSAGE_VERSION = 1 as const;
-
-function createIdFactory(): () => string {
-	let sequence = 0;
-
-	return () => {
-		sequence += 1;
-		return `job_${Date.now()}_${sequence}`;
-	};
-}
 
 function defaultRetryPolicy(): RetryPolicy {
 	return {
@@ -66,14 +58,34 @@ function toStatusView(jobRun: JobRun): JobRunStatusView {
 	};
 }
 
+function buildDefinitions<THandlers extends JobHandlerMap>(
+	handlers: THandlers,
+): Map<string, JobDefinition> {
+	const definitions = new Map<string, JobDefinition>();
+	const timestamp = new Date(0).toISOString();
+
+	for (const jobName of Object.keys(handlers)) {
+		definitions.set(jobName, {
+			id: jobName,
+			name: jobName,
+			handler: jobName,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+		});
+	}
+
+	return definitions;
+}
+
 export function createJobs<THandlers extends JobHandlerMap>(
 	options: CreateJobsOptions<THandlers>,
 ) {
 	const retry = resolveRetryPolicy(options.retry);
 	const getNow = options.now ?? (() => new Date());
-	const generateId = options.generateId ?? createIdFactory();
 	const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+	const definitions = buildDefinitions(options.handlers);
 	let schemaVerification: Promise<void> | undefined;
+	let definitionsSynchronization: Promise<void> | undefined;
 
 	function ensureSchemaVersion(): Promise<void> {
 		if (!options.storage.verifySchemaVersion) {
@@ -87,11 +99,69 @@ export function createJobs<THandlers extends JobHandlerMap>(
 		return schemaVerification;
 	}
 
+	async function synchronizeDefinitions(): Promise<void> {
+		if (!options.storage.createDefinition) {
+			return;
+		}
+
+		for (const definition of definitions.values()) {
+			await options.storage.createDefinition(definition);
+		}
+	}
+
+	function ensureDefinitions(): Promise<void> {
+		if (!definitionsSynchronization) {
+			definitionsSynchronization = synchronizeDefinitions();
+		}
+
+		return definitionsSynchronization;
+	}
+
+	async function resolveDefinitionByName(
+		jobName: string,
+	): Promise<JobDefinition> {
+		const inMemoryDefinition = definitions.get(jobName);
+		if (!inMemoryDefinition) {
+			throw new Error(`Missing job definition for "${jobName}"`);
+		}
+
+		if (options.storage.getDefinitionByName) {
+			const storedDefinition =
+				await options.storage.getDefinitionByName(jobName);
+			if (storedDefinition) {
+				return storedDefinition;
+			}
+		}
+
+		return inMemoryDefinition;
+	}
+
+	async function resolveDefinitionForRun(
+		jobRun: JobRun,
+	): Promise<JobDefinition> {
+		if (options.storage.getDefinition) {
+			const storedDefinition = await options.storage.getDefinition(
+				jobRun.jobId,
+			);
+			if (storedDefinition) {
+				return storedDefinition;
+			}
+		}
+
+		const fallbackDefinition = definitions.get(jobRun.jobName);
+		if (!fallbackDefinition) {
+			throw new Error(`Missing job definition for "${jobRun.jobName}"`);
+		}
+
+		return fallbackDefinition;
+	}
+
 	return {
 		async create<TPayload extends JsonValue>(
 			input: CreateJobInput<TPayload>,
 		): Promise<{ jobId: string }> {
 			await ensureSchemaVersion();
+			await ensureDefinitions();
 
 			if (input.dedupeKey) {
 				const existingJob = await options.storage.getRunByDedupeKey(
@@ -105,9 +175,10 @@ export function createJobs<THandlers extends JobHandlerMap>(
 
 			const now = getNow();
 			const nextRunAt = input.runAt ?? now;
-			const jobRun: JobRun<TPayload> = {
-				id: generateId(),
-				jobName: input.name,
+			const definition = await resolveDefinitionByName(input.name);
+			const jobRun = await options.storage.createRun({
+				jobId: definition.id,
+				jobName: definition.name,
 				status: "scheduled",
 				payload: input.payload,
 				attempt: 0,
@@ -119,9 +190,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 				finishedAt: null,
 				lastError: null,
 				...(input.dedupeKey ? { dedupeKey: input.dedupeKey } : {}),
-			};
-
-			await options.storage.createRun(jobRun);
+			});
 
 			if (nextRunAt.getTime() <= now.getTime()) {
 				const queuedJob = await options.storage.markQueued({
@@ -141,6 +210,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 
 		async dispatch(input?: { limit?: number }): Promise<DispatchResult> {
 			await ensureSchemaVersion();
+			await ensureDefinitions();
 
 			const now = getNow();
 			const limit = input?.limit ?? 100;
@@ -168,6 +238,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 
 		async consume(message: JobRunMessage): Promise<ConsumeResult> {
 			await ensureSchemaVersion();
+			await ensureDefinitions();
 
 			if (message.version !== MESSAGE_VERSION) {
 				throw new Error(`Unsupported job message version: ${message.version}`);
@@ -201,6 +272,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 				}
 
 				const handler = options.handlers[runningJob.jobName];
+				const definition = await resolveDefinitionForRun(runningJob);
 
 				if (!handler) {
 					const missingHandlerError = `Missing handler for job "${runningJob.jobName}"`;
@@ -213,7 +285,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 				}
 
 				try {
-					await handler({ job: runningJob, now });
+					await handler({ definition, job: runningJob, now });
 					await options.storage.markSucceeded({
 						jobRunId: runningJob.id,
 						now,
@@ -254,6 +326,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 
 		async getStatus(jobId: string): Promise<JobRunStatusView | null> {
 			await ensureSchemaVersion();
+			await ensureDefinitions();
 
 			const jobRun = await options.storage.getRun(jobId);
 			return jobRun ? toStatusView(jobRun) : null;

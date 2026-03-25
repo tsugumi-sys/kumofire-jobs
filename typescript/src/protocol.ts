@@ -38,7 +38,8 @@ export interface JobSchedule {
 }
 
 export interface JobRun<TPayload extends JsonValue = JsonValue> {
-	id: string;
+	id?: string;
+	jobId: string;
 	jobName: string;
 	status: JobRunStatus;
 	payload: TPayload;
@@ -90,6 +91,7 @@ export interface RetryPolicy {
 }
 
 export interface JobHandlerContext<TPayload extends JsonValue = JsonValue> {
+	definition: JobDefinition;
 	job: JobRun<TPayload>;
 	now: Date;
 }
@@ -102,7 +104,10 @@ export type JobHandlerMap = Record<string, JobHandler>;
 
 export interface JobStorageAdapter {
 	verifySchemaVersion?(): Promise<void>;
-	createRun(jobRun: JobRun): Promise<JobRun>;
+	createDefinition?(definition: JobDefinition): Promise<JobDefinition>;
+	getDefinition?(jobId: string): Promise<JobDefinition | null>;
+	getDefinitionByName?(jobName: string): Promise<JobDefinition | null>;
+	createRun(jobRun: Omit<JobRun, "id">): Promise<JobRun>;
 	getRun(jobRunId: string): Promise<JobRun | null>;
 	getRunByDedupeKey(dedupeKey: string): Promise<JobRun | null>;
 	listDispatchableJobs(params: { now: Date; limit: number }): Promise<JobRun[]>;
@@ -142,7 +147,6 @@ export interface CreateJobsOptions<THandlers extends JobHandlerMap> {
 	retry?: Partial<RetryPolicy>;
 	leaseMs?: number;
 	now?: () => Date;
-	generateId?: () => string;
 }
 
 export interface DispatchResult {
