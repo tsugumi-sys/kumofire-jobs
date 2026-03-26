@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { createInterface } from "node:readline/promises";
 import process from "node:process";
+import { createInterface } from "node:readline/promises";
 import {
-	type CommandExecution,
 	CloudflareCliError,
+	type CommandExecution,
 	runCloudflareCli,
 } from "./cloudflare/cli";
 

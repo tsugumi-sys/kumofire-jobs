@@ -70,9 +70,9 @@ describe("cloudflare cli option parsing", () => {
 	});
 
 	it("rejects missing database", () => {
-		expect(() =>
-			parseCloudflareMigrateOptions(["--remote"]),
-		).toThrowError("Missing required flag: --database <name>");
+		expect(() => parseCloudflareMigrateOptions(["--remote"])).toThrowError(
+			"Missing required flag: --database <name>",
+		);
 	});
 });
 
@@ -111,7 +111,11 @@ describe("cloudflare cli migrate command", () => {
 
 		expect(executions).toHaveLength(2);
 		expect(logs).toContain("Pending migrations: 1");
-		expect(logs.some((line) => line.startsWith("wrangler d1 execute jobs-db --remote"))).toBe(true);
+		expect(
+			logs.some((line) =>
+				line.startsWith("wrangler d1 execute jobs-db --remote"),
+			),
+		).toBe(true);
 		expect(logs.at(-1)).not.toBe("Done. Schema version is now 1.");
 	});
 

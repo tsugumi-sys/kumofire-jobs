@@ -1,4 +1,4 @@
-import { schemaMigrations, requiredSchemaVersion } from "./schema";
+import { requiredSchemaVersion, schemaMigrations } from "./schema";
 
 export interface CloudflareMigrateOptions {
 	target: "local" | "remote";
@@ -163,7 +163,8 @@ async function executeWranglerJson(
 	const result = await deps.execute(execution);
 
 	if (result.exitCode !== 0) {
-		const detail = result.stderr.trim() || result.stdout.trim() || "unknown error";
+		const detail =
+			result.stderr.trim() || result.stdout.trim() || "unknown error";
 		throw new CloudflareCliError(`Wrangler command failed: ${detail}`);
 	}
 
@@ -182,8 +183,15 @@ async function getCurrentSchemaVersion(
 ): Promise<number> {
 	const tableCheckSql =
 		"SELECT COUNT(*) AS kumofire_table_exists FROM sqlite_master WHERE type = 'table' AND name = 'kumofire_schema_version'";
-	const tableCheckResult = await executeWranglerJson(deps, options, tableCheckSql);
-	const tableExists = findNumberField(tableCheckResult, "kumofire_table_exists");
+	const tableCheckResult = await executeWranglerJson(
+		deps,
+		options,
+		tableCheckSql,
+	);
+	const tableExists = findNumberField(
+		tableCheckResult,
+		"kumofire_table_exists",
+	);
 
 	if (tableExists === null) {
 		throw new CloudflareCliError(
@@ -521,6 +529,8 @@ export function formatDisplayedWranglerCommand(
 	);
 }
 
-export function normalizeCwdForDisplay(cwd: string | undefined): string | undefined {
+export function normalizeCwdForDisplay(
+	cwd: string | undefined,
+): string | undefined {
 	return cwd ? toPosixPath(cwd) : undefined;
 }
