@@ -1,5 +1,9 @@
 import { Hono } from "hono";
-import { createCloudflareRuntime } from "@kumofire/jobs";
+import {
+	createCloudflareRuntime,
+	type CloudflareJobHandlerContext,
+	type JobRunMessage,
+} from "@kumofire/jobs";
 
 type EmailJobPayload = {
 	to: string;
@@ -11,10 +15,27 @@ type AlwaysFailJobPayload = {
 	reason?: string;
 };
 
+type SaveRecordJobPayload = {
+	key: string;
+	value: string;
+};
+
 type Bindings = {
 	JOBS_DB: D1Database;
-	JOBS_QUEUE: Queue;
+	JOBS_QUEUE: Queue<JobRunMessage>;
 };
+
+async function ensureExampleRecordsTable(db: D1Database) {
+	await db
+		.prepare(`CREATE TABLE IF NOT EXISTS example_saved_records (
+	id TEXT PRIMARY KEY,
+	record_key TEXT NOT NULL,
+	record_value TEXT NOT NULL,
+	job_run_id TEXT NOT NULL,
+	created_at TEXT NOT NULL
+)`)
+		.run();
+}
 
 const runtime = createCloudflareRuntime({
 	handlers: {
@@ -36,6 +57,34 @@ const runtime = createCloudflareRuntime({
 			});
 
 			throw new Error(payload.reason ?? "intentional failure");
+		},
+		"save-record": async (
+			context: CloudflareJobHandlerContext<SaveRecordJobPayload>,
+		) => {
+			const payload = context.job.payload as SaveRecordJobPayload;
+
+			await ensureExampleRecordsTable(context.cloudflare.db);
+			await context.cloudflare.db
+				.prepare(`INSERT INTO example_saved_records (
+	id,
+	record_key,
+	record_value,
+	job_run_id,
+	created_at
+) VALUES (?, ?, ?, ?, ?)`)
+				.bind(
+					crypto.randomUUID(),
+					payload.key,
+					payload.value,
+					context.job.id ?? "",
+					context.now.toISOString(),
+				)
+				.run();
+
+			console.log("saved example record", {
+				jobRunId: context.job.id,
+				key: payload.key,
+			});
 		},
 	},
 });
@@ -77,6 +126,17 @@ app.post("/jobs/fail-always", async (c) => {
 	return c.json({ jobId }, 202);
 });
 
+app.post("/jobs/save-record", async (c) => {
+	const payload = await c.req.json<SaveRecordJobPayload>();
+	const jobs = runtime.bind(getResources(c.env));
+	const { jobId } = await jobs.create({
+		name: "save-record",
+		payload,
+	});
+
+	return c.json({ jobId }, 202);
+});
+
 app.get("/jobs/:jobId", async (c) => {
 	const jobs = runtime.bind(getResources(c.env));
 	const status = await jobs.getStatus(c.req.param("jobId"));
@@ -91,7 +151,7 @@ app.get("/jobs/:jobId", async (c) => {
 export default {
 	fetch: app.fetch,
 
-	queue(batch: MessageBatch<unknown>, env: Bindings) {
+	queue(batch: MessageBatch<JobRunMessage>, env: Bindings) {
 		return runtime.consumeBatch(batch, getResources(env));
 	},
 

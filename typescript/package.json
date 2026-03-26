@@ -1,6 +1,6 @@
 {
 	"name": "@kumofire/jobs",
-	"version": "0.1.4",
+	"version": "0.1.5",
 	"description": "A job processing library for Cloudflare Workers.",
 	"type": "module",
 	"main": "dist/index.mjs",
@@ -24,6 +24,7 @@
 		"build": "pnpm run sync:schema && tsdown src/index.ts src/cli.ts --format esm --dts",
 		"test": "vitest run",
 		"lint": "biome check .",
+		"check-all": "pnpm format && pnpm lint && pnpm typecheck && pnpm test",
 		"format": "biome format --write .",
 		"typecheck": "pnpm run sync:schema && tsc --noEmit"
 	},

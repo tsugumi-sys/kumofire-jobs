@@ -14,6 +14,9 @@ export {
 } from "./cloudflare";
 export type {
 	CloudflareConsumeBatchResult,
+	CloudflareJobHandler,
+	CloudflareJobHandlerContext,
+	CloudflareJobHandlerMap,
 	CloudflareMessageBatch,
 	CloudflareQueueMessage,
 	CloudflareRuntimeResources,

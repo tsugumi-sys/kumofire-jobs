@@ -3,8 +3,11 @@ import type {
 	ConsumeResult,
 	CreateJobsOptions,
 	DispatchResult,
-	JobHandlerMap,
+	JobDefinition,
+	JobHandlerContext,
+	JobRun,
 	JobRunMessage,
+	JsonValue,
 } from "../protocol";
 import {
 	type CloudflareQueue,
@@ -35,13 +38,33 @@ export interface CloudflareConsumeBatchResult {
 	results: ConsumeResult[];
 }
 
-type CloudflareRuntimeCoreOptions<THandlers extends JobHandlerMap> = Omit<
-	CreateJobsOptions<THandlers>,
-	"storage" | "queue"
+export interface CloudflareJobHandlerContext<
+	TPayload extends JsonValue = JsonValue,
+> {
+	definition: JobDefinition;
+	job: JobRun<TPayload>;
+	now: Date;
+	cloudflare: CloudflareRuntimeResources;
+}
+
+export type CloudflareJobHandler<TPayload extends JsonValue = JsonValue> = (
+	context: CloudflareJobHandlerContext<TPayload>,
+) => Promise<void> | void;
+
+export type CloudflareJobHandlerMap = Record<string, CloudflareJobHandler>;
+
+type CloudflareRuntimeCoreOptions = Omit<
+	CreateJobsOptions<
+		Record<string, (context: JobHandlerContext) => Promise<void> | void>
+	>,
+	"storage" | "queue" | "handlers"
 >;
 
-export interface CreateCloudflareRuntimeOptions<THandlers extends JobHandlerMap>
-	extends CloudflareRuntimeCoreOptions<THandlers> {}
+export interface CreateCloudflareRuntimeOptions<
+	THandlers extends CloudflareJobHandlerMap,
+> extends CloudflareRuntimeCoreOptions {
+	handlers: THandlers;
+}
 
 function isJobRunMessage(value: unknown): value is JobRunMessage {
 	if (typeof value !== "object" || value === null) {
@@ -52,12 +75,29 @@ function isJobRunMessage(value: unknown): value is JobRunMessage {
 	return candidate.version === 1 && typeof candidate.jobRunId === "string";
 }
 
-export function createCloudflareRuntime<THandlers extends JobHandlerMap>(
-	options: CreateCloudflareRuntimeOptions<THandlers>,
-) {
+export function createCloudflareRuntime<
+	THandlers extends CloudflareJobHandlerMap,
+>(options: CreateCloudflareRuntimeOptions<THandlers>) {
 	function bind(resources: CloudflareRuntimeResources) {
+		const handlers: Record<
+			string,
+			(context: JobHandlerContext) => Promise<void> | void
+		> = Object.fromEntries(
+			Object.entries(options.handlers).map(([jobName, handler]) => [
+				jobName,
+				(context: JobHandlerContext) =>
+					handler({
+						definition: context.definition as JobDefinition,
+						job: context.job as JobRun,
+						now: context.now,
+						cloudflare: resources,
+					}),
+			]),
+		);
+
 		return createJobs({
 			...options,
+			handlers,
 			storage: createD1StorageAdapter({ db: resources.db }),
 			queue: createCloudflareQueueAdapter(resources.queue),
 		});
