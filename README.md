@@ -50,17 +50,26 @@ kumofire-jobs cloudflare migrate --remote --database kumofire-jobs-example --dry
 Quick Cloudflare Worker shape:
 
 ```ts
-import { createCloudflareRuntime } from "@kumofire/jobs";
+import {
+  createCloudflareRuntime,
+  type JobRunMessage,
+} from "@kumofire/jobs";
 
 type Bindings = {
   JOBS_DB: D1Database;
-  JOBS_QUEUE: Queue;
+  JOBS_QUEUE: Queue<JobRunMessage>;
 };
 
 const runtime = createCloudflareRuntime({
   handlers: {
     email: async ({ job }) => {
       console.log("processing", job.id);
+    },
+    "save-record": async ({ job, cloudflare }) => {
+      await cloudflare.db
+        .prepare("INSERT INTO example_saved_records (id, value) VALUES (?, ?)")
+        .bind(crypto.randomUUID(), JSON.stringify(job.payload))
+        .run();
     },
   },
 });
@@ -93,7 +102,7 @@ export default {
     return runtime.dispatchScheduled(resources(env));
   },
 
-  queue(batch: MessageBatch<unknown>, env: Bindings) {
+  queue(batch: MessageBatch<JobRunMessage>, env: Bindings) {
     return runtime.consumeBatch(batch, resources(env));
   },
 };
