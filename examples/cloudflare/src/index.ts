@@ -1,11 +1,5 @@
 import { Hono } from "hono";
-import {
-	createCloudflareRuntime,
-	type CloudflareMessageBatch,
-	type CloudflareQueue,
-	type D1Database,
-	type JobRunMessage,
-} from "@kumofire/jobs";
+import { createCloudflareRuntime } from "@kumofire/jobs";
 
 type EmailJobPayload = {
 	to: string;
@@ -19,7 +13,7 @@ type AlwaysFailJobPayload = {
 
 type Bindings = {
 	JOBS_DB: D1Database;
-	JOBS_QUEUE: CloudflareQueue<JobRunMessage>;
+	JOBS_QUEUE: Queue;
 };
 
 const runtime = createCloudflareRuntime({
@@ -97,7 +91,7 @@ app.get("/jobs/:jobId", async (c) => {
 export default {
 	fetch: app.fetch,
 
-	queue(batch: CloudflareMessageBatch<unknown>, env: Bindings) {
+	queue(batch: MessageBatch<unknown>, env: Bindings) {
 		return runtime.consumeBatch(batch, getResources(env));
 	},
 

@@ -20,7 +20,7 @@ export interface CloudflareQueueMessage<TBody = unknown> {
 }
 
 export interface CloudflareMessageBatch<TBody = unknown> {
-	messages: CloudflareQueueMessage<TBody>[];
+	messages: readonly CloudflareQueueMessage<TBody>[];
 }
 
 export interface CloudflareRuntimeResources {
