@@ -28,7 +28,7 @@ The Worker also exports:
 1. Install dependencies.
 2. Create a D1 database and a Queue.
 3. Update `wrangler.jsonc` with the real D1 database id.
-4. Apply the D1 schema before running the Worker.
+4. Apply Kumofire Jobs migrations before running the Worker.
 
 Example:
 
@@ -37,7 +37,7 @@ cd examples/cloudflare
 pnpm install
 wrangler d1 create kumofire-jobs-example
 wrangler queues create kumofire-jobs-example
-wrangler d1 execute kumofire-jobs-example --file=../../typescript/sql/sqlite/0001_init.sql
+pnpm exec kumofire-jobs cloudflare migrate --local --database kumofire-jobs-example
 pnpm dev
 ```
 

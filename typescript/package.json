@@ -1,10 +1,13 @@
 {
 	"name": "@kumofire/jobs",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "A job processing library for Cloudflare Workers.",
 	"type": "module",
 	"main": "dist/index.mjs",
 	"types": "dist/index.d.mts",
+	"bin": {
+		"kumofire-jobs": "./dist/cli.mjs"
+	},
 	"exports": {
 		".": {
 			"types": "./dist/index.d.mts",
@@ -18,7 +21,7 @@
 	],
 	"scripts": {
 		"sync:schema": "node scripts/sync-sqlite-schema.mjs",
-		"build": "pnpm run sync:schema && tsdown src/index.ts --format esm --dts",
+		"build": "pnpm run sync:schema && tsdown src/index.ts src/cli.ts --format esm --dts",
 		"test": "vitest run",
 		"lint": "biome check .",
 		"format": "biome format --write .",
@@ -49,6 +52,7 @@
 		"@cloudflare/workers-types": "^4.20260317.1"
 	},
 	"devDependencies": {
+		"@types/node": "^24.7.2",
 		"@biomejs/biome": "^2.4.8",
 		"tsdown": "^0.21.4",
 		"typescript": "^6.0.2",

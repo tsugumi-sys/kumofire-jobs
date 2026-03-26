@@ -1,51 +1,44 @@
 # Cloudflare Migration Workflow
 
-This library ships reference SQLite/D1 schema assets.
-It does not apply Cloudflare D1 migrations for you.
+This library owns the Cloudflare migration set and exposes a CLI for applying it.
 
-Your application owns:
+Your application still owns:
 
 * creating the D1 database
-* executing the SQL migrations
+* choosing local or remote migration targets
 * deploying schema changes before deploying code that requires them
 
-The runtime only verifies schema version on use.
+The runtime verifies schema version on use.
 
 ## Current Schema Version
 
 The current required version is exported as `requiredSchemaVersion`.
 
-The packaged reference SQL is exported in two forms:
-
-* versioned SQL files under `sql/sqlite/`
-* `getReferenceSchemaSql(...)` for programmatic access
-
-In this repository, the canonical SQL file is:
-
-* [typescript/sql/sqlite/0001_init.sql](https://github.com/tsugumi-sys/kumofire-jobs/blob/main/typescript/sql/sqlite/0001_init.sql)
+The packaged migration metadata is exposed through the library and used by the CLI.
 
 ## First-Time Setup
 
 1. Create the D1 database.
-2. Apply the initial schema SQL before using the runtime.
+2. Apply the initial migration before using the runtime.
 3. Bind that database to your Worker as `JOBS_DB`.
 
 Example:
 
 ```bash
 wrangler d1 create kumofire-jobs-example
-wrangler d1 execute kumofire-jobs-example --file=../../typescript/sql/sqlite/0001_init.sql
+kumofire-jobs cloudflare migrate --local --database kumofire-jobs-example
 ```
 
-If you are consuming the published package instead of this repository checkout, use the installed asset path:
+For a remote database:
 
 ```bash
-wrangler d1 execute kumofire-jobs-example --file=./node_modules/@kumofire/jobs/sql/sqlite/0001_init.sql
+kumofire-jobs cloudflare migrate --remote --database kumofire-jobs-example
 ```
 
 ## Runtime Verification
 
 `createD1StorageAdapter(...)` verifies that the stored schema version is at least the required version.
+`kumofire-jobs cloudflare migrate` applies any missing migrations before runtime use.
 
 If the database is behind, runtime calls fail with an error like:
 
@@ -61,40 +54,32 @@ It prevents a Worker from running against an older D1 schema.
 For every package upgrade:
 
 1. Check whether `requiredSchemaVersion` changed.
-2. Apply the new SQL migration in D1.
+2. Run the migration CLI against the target D1 database.
 3. Deploy the Worker code that expects that version.
 
-Today the package ships only the initial migration:
+The CLI computes pending migrations and applies them in version order.
 
-* `0001_init.sql`
+## CLI Usage
 
-When later versions are added, apply them in order.
+The migration CLI supports:
 
-## Programmatic SQL Access
+* `--local`
+* `--remote`
+* `--database <name>`
+* `--config <path>`
+* `--cwd <path>`
+* `--dry-run`
+* `--yes`
 
-If your deployment tooling wants SQL from code instead of the packaged file, use `getReferenceSchemaSql(...)`.
+Examples:
 
-Example:
-
-```ts
-import {
-  getReferenceSchemaSql,
-  requiredSchemaVersion,
-} from "@kumofire/jobs";
-
-const sql = getReferenceSchemaSql({
-  fromVersion: 0,
-  toVersion: requiredSchemaVersion,
-});
+```bash
+kumofire-jobs cloudflare migrate --local --database kumofire-jobs-example
+kumofire-jobs cloudflare migrate --remote --database kumofire-jobs-example
+kumofire-jobs cloudflare migrate --remote --database kumofire-jobs-example --dry-run
 ```
 
-This is useful for:
-
-* CI validation
-* generating reference migration output
-* tooling that compares desired and installed versions
-
-It is still your deployment system's responsibility to execute the SQL.
+The CLI prints the exact Wrangler command before applying migrations and asks for confirmation unless `--yes` is set.
 
 ## Current Tables
 
