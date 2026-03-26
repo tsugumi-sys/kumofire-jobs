@@ -15,12 +15,6 @@ export function createD1StorageAdapter(params: {
 	const definitionRepository = createDefinitionRepository(params.db);
 	const jobRunRepository = createJobRunRepository(params.db);
 	const leaseRepository = createLeaseRepository(params.db);
-	let sequence = 0;
-
-	function generateRunId(): string {
-		sequence += 1;
-		return `job_run_${sequence}`;
-	}
 
 	return {
 		async verifySchemaVersion() {
@@ -47,7 +41,7 @@ export function createD1StorageAdapter(params: {
 		createRun(jobRun) {
 			const createdJobRun: JobRun & { id: string } = {
 				...jobRun,
-				id: generateRunId(),
+				id: crypto.randomUUID(),
 			};
 
 			return jobRunRepository.create(createdJobRun);

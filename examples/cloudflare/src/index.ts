@@ -13,6 +13,10 @@ type EmailJobPayload = {
 	body: string;
 };
 
+type AlwaysFailJobPayload = {
+	reason?: string;
+};
+
 type Bindings = {
 	JOBS_DB: D1Database;
 	JOBS_QUEUE: CloudflareQueue<JobRunMessage>;
@@ -28,6 +32,16 @@ const runtime = createCloudflareRuntime({
 				to: payload.to,
 				subject: payload.subject,
 			});
+		},
+		"fail-always": async ({ job }) => {
+			const payload = job.payload as AlwaysFailJobPayload;
+
+			console.log("processing fail-always job", {
+				jobRunId: job.id,
+				reason: payload.reason ?? "intentional failure",
+			});
+
+			throw new Error(payload.reason ?? "intentional failure");
 		},
 	},
 });
@@ -52,6 +66,17 @@ app.post("/jobs/email", async (c) => {
 	const jobs = runtime.bind(getResources(c.env));
 	const { jobId } = await jobs.create({
 		name: "email",
+		payload,
+	});
+
+	return c.json({ jobId }, 202);
+});
+
+app.post("/jobs/fail-always", async (c) => {
+	const payload = await c.req.json<AlwaysFailJobPayload>();
+	const jobs = runtime.bind(getResources(c.env));
+	const { jobId } = await jobs.create({
+		name: "fail-always",
 		payload,
 	});
 

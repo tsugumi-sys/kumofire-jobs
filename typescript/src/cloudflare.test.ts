@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
 	CloudflareQueue,
@@ -777,6 +777,52 @@ describe("cloudflare adapters", () => {
 		const storage = createD1StorageAdapter({ db });
 
 		await expect(storage.getRun("job_run_1")).rejects.toThrow();
+	});
+
+	it("generates unique run ids across fresh D1 adapter instances", async () => {
+		const db = new FakeD1Database();
+		const randomUuid = vi
+			.spyOn(globalThis.crypto, "randomUUID")
+			.mockReturnValueOnce("00000000-0000-4000-8000-000000000001")
+			.mockReturnValueOnce("00000000-0000-4000-8000-000000000002");
+		const firstStorage = createD1StorageAdapter({ db });
+		const secondStorage = createD1StorageAdapter({ db });
+
+		try {
+			const firstRun = await firstStorage.createRun({
+				jobId: "email",
+				jobName: "email",
+				status: "scheduled",
+				payload: { to: "one@example.com" },
+				attempt: 0,
+				maxAttempts: 3,
+				scheduledFor: "2026-03-25T00:00:00.000Z",
+				createdAt: "2026-03-25T00:00:00.000Z",
+				updatedAt: "2026-03-25T00:00:00.000Z",
+				startedAt: null,
+				finishedAt: null,
+				lastError: null,
+			});
+			const secondRun = await secondStorage.createRun({
+				jobId: "email",
+				jobName: "email",
+				status: "scheduled",
+				payload: { to: "two@example.com" },
+				attempt: 0,
+				maxAttempts: 3,
+				scheduledFor: "2026-03-25T00:00:01.000Z",
+				createdAt: "2026-03-25T00:00:01.000Z",
+				updatedAt: "2026-03-25T00:00:01.000Z",
+				startedAt: null,
+				finishedAt: null,
+				lastError: null,
+			});
+
+			expect(firstRun.id).toBe("00000000-0000-4000-8000-000000000001");
+			expect(secondRun.id).toBe("00000000-0000-4000-8000-000000000002");
+		} finally {
+			randomUuid.mockRestore();
+		}
 	});
 
 	it("falls back to in-memory definitions when the D1 definition row is missing", async () => {

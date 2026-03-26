@@ -13,6 +13,8 @@ This example shows a minimal Worker product built with:
   * health response
 * `POST /jobs/email`
   * create an email job
+* `POST /jobs/fail-always`
+  * create a job that always throws
 * `GET /jobs/:jobId`
   * read run status
 
@@ -47,6 +49,14 @@ pnpm dev
 curl -X POST http://127.0.0.1:8787/jobs/email \
   -H 'content-type: application/json' \
   -d '{"to":"user@example.com","subject":"Welcome","body":"Hello"}'
+```
+
+Failing job:
+
+```bash
+curl -X POST http://127.0.0.1:8787/jobs/fail-always \
+  -H 'content-type: application/json' \
+  -d '{"reason":"expected example failure"}'
 ```
 
 Then check the run:

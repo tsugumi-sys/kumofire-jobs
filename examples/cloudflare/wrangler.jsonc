@@ -1,26 +1,26 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "kumofire-jobs-cloudflare-example",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-03-25",
-  "d1_databases": [
-    {
-      "binding": "JOBS_DB",
-      "database_name": "kumofire-jobs-example",
-      "database_id": "REPLACE_WITH_REAL_DATABASE_ID"
-    }
-  ],
-  "queues": {
-    "producers": [
-      {
-        "binding": "JOBS_QUEUE",
-        "queue": "kumofire-jobs-example"
-      }
-    ],
-    "consumers": [
-      {
-        "queue": "kumofire-jobs-example"
-      }
-    ]
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "kumofire-jobs-cloudflare-example",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-03-25",
+	"d1_databases": [
+		{
+			"binding": "JOBS_DB",
+			"database_name": "kumofire-jobs-example",
+			"database_id": "8c2f008f-d79f-47a1-b093-59c163714540"
+		}
+	],
+	"queues": {
+		"producers": [
+			{
+				"binding": "JOBS_QUEUE",
+				"queue": "kumofire-jobs-example"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "kumofire-jobs-example"
+			}
+		]
+	}
 }
