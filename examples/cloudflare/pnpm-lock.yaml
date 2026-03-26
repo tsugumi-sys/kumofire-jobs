@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@kumofire/jobs':
-        specifier: 0.1.4
-        version: 0.1.4
+        specifier: 0.1.5
+        version: 0.1.5
       hono:
         specifier: ^4.8.12
         version: 4.12.9
@@ -399,8 +399,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
 
-  '@kumofire/jobs@0.1.4':
-    resolution: {integrity: sha512-kkG2Bkl3XSvZyZE2KLZvT/xBzC5PSJ/8cc34kQOdKl4f5LcjCiHT578Tg9XUvHiR3lSBswFzeefLwXED0uIlkw==}
+  '@kumofire/jobs@0.1.5':
+    resolution: {integrity: sha512-Wj7lWJT9MI6fsWH2JN1khuTdfl+2pcbtg5WsDFHRLxJSbcPcyK6eRIW3FxhQ4rp6S/fXaa4B0If9bFoh/S4H7g==}
     hasBin: true
 
   '@poppinss/colors@4.1.6':
@@ -742,7 +742,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@kumofire/jobs@0.1.4':
+  '@kumofire/jobs@0.1.5':
     dependencies:
       '@cloudflare/workers-types': 4.20260317.1
 
