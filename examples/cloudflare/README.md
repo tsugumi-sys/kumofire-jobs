@@ -5,6 +5,7 @@ This example shows a minimal Worker product built with:
 * Hono for HTTP routes
 * D1 for job state
 * Cloudflare Queues for delivery
+* Cron Triggers for dispatching ready jobs
 * `@kumofire/jobs` for create, dispatch, consume, and status lookup
 
 ## Endpoints
@@ -21,9 +22,15 @@ This example shows a minimal Worker product built with:
 The Worker also exports:
 
 * `scheduled`
-  * dispatches due jobs from D1 into the queue
+  * dispatches ready jobs from D1 into the queue
 * `queue`
   * consumes queue messages and runs handlers
+
+The example Wrangler config includes:
+
+* `triggers.crons = ["* * * * *"]`
+  * runs the `scheduled()` handler every minute
+  * picks up ready jobs and enqueues them automatically
 
 ## Setup
 
@@ -40,7 +47,7 @@ pnpm install
 wrangler d1 create kumofire-jobs-example
 wrangler queues create kumofire-jobs-example
 pnpm exec kumofire-jobs cloudflare migrate --local --database kumofire-jobs-example
-pnpm dev
+pnpm dev -- --test-scheduled
 ```
 
 ## Request Example
@@ -63,4 +70,10 @@ Then check the run:
 
 ```bash
 curl http://127.0.0.1:8787/jobs/<job-id>
+```
+
+You can also test the scheduled dispatch path locally:
+
+```bash
+curl "http://127.0.0.1:8787/__scheduled?cron=*+*+*+*+*"
 ```

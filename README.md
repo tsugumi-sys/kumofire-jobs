@@ -108,6 +108,18 @@ export default {
 };
 ```
 
+To dispatch ready jobs automatically, add a Cron Trigger to your Worker configuration:
+
+```jsonc
+{
+  "triggers": {
+    "crons": ["* * * * *"]
+  }
+}
+```
+
+That will invoke `scheduled()` every minute so due jobs are picked up from D1 and sent to the queue.
+
 The migration CLI:
 
 * checks the current D1 schema version

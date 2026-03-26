@@ -2,10 +2,15 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "kumofire-jobs-cloudflare-example",
 	"main": "src/index.ts",
-	"compatibility_date": "2026-03-25",
-	"d1_databases": [
-		{
-			"binding": "JOBS_DB",
+  "compatibility_date": "2026-03-25",
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "JOBS_DB",
 			"database_name": "kumofire-jobs-example",
 			"database_id": "8c2f008f-d79f-47a1-b093-59c163714540"
 		}
