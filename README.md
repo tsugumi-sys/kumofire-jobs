@@ -32,19 +32,19 @@ npm install @kumofire/jobs
 Run migrations for local D1:
 
 ```bash
-kumofire-jobs cloudflare migrate --local --database kumofire-jobs-example
+npm exec -- kumofire-jobs cloudflare migrate --local --database kumofire-jobs-example
 ```
 
 Run migrations for remote D1:
 
 ```bash
-kumofire-jobs cloudflare migrate --remote --database kumofire-jobs-example
+npm exec -- kumofire-jobs cloudflare migrate --remote --database kumofire-jobs-example
 ```
 
 Preview pending migrations without applying them:
 
 ```bash
-kumofire-jobs cloudflare migrate --remote --database kumofire-jobs-example --dry-run
+npm exec -- kumofire-jobs cloudflare migrate --remote --database kumofire-jobs-example --dry-run
 ```
 
 Quick Cloudflare Worker shape:
