@@ -4,7 +4,7 @@ import {
 	createInMemoryQueueAdapter,
 	createInMemoryStorageAdapter,
 	createJobs,
-} from "./index";
+} from "../index";
 
 describe("in-memory adapter", () => {
 	it("creates a job and dispatches it immediately when due", async () => {
@@ -132,6 +132,7 @@ describe("in-memory adapter", () => {
 		if (!message) {
 			throw new Error("expected a queue message");
 		}
+
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "succeeded",
 			jobRunId: jobId,
@@ -173,6 +174,7 @@ describe("in-memory adapter", () => {
 		if (!message) {
 			throw new Error("expected a queue message");
 		}
+
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "retried",
 			jobRunId: jobId,
@@ -225,6 +227,7 @@ describe("in-memory adapter", () => {
 		if (!message) {
 			throw new Error("expected a queue message");
 		}
+
 		await jobs.consume(message);
 		now = new Date("2026-03-25T00:00:05.000Z");
 		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
