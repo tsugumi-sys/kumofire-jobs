@@ -96,10 +96,15 @@ export default {
 The current Cloudflare path is built around the single-run lifecycle:
 
 1. `jobs.create(...)` creates a `scheduled` run.
-2. If `runAt <= now`, the run is moved to `queued` immediately and a queue message is sent.
-3. `runtime.dispatchScheduled(...)` moves due scheduled runs to `queued` and sends queue messages.
-4. `runtime.consumeBatch(...)` validates queue messages and calls `jobs.consume(...)`.
+2. `jobs.createSchedule(...)` registers a recurring schedule rule in D1.
+3. If `runAt <= now`, the run is moved to `queued` immediately and a queue message is sent.
+4. `runtime.dispatchScheduled(...)` materializes due schedules, moves due runs to `queued`, and sends queue messages.
 5. The consumer moves the run through `running`, then `succeeded`, `retried`, or `failed`.
+
+Use `jobs.create(...)` for one-shot runs and delayed runs with `runAt: Date`.
+Use `jobs.createSchedule(...)` for recurring schedules.
+Currently, recurring schedules support `scheduleType: "cron"`.
+Use `timezone` when you want the cron rule evaluated in a specific time zone.
 
 Queue messages stay intentionally small:
 
@@ -127,6 +132,7 @@ Your Worker needs:
 * one D1 database
 * one Queue producer binding
 * one Queue consumer binding for the same queue
+* one Cron Trigger that calls the Worker `scheduled()` handler
 
 Example `wrangler.jsonc`:
 
@@ -136,6 +142,9 @@ Example `wrangler.jsonc`:
   "name": "kumofire-jobs-cloudflare-example",
   "main": "src/index.ts",
   "compatibility_date": "2026-03-25",
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "d1_databases": [
     {
       "binding": "JOBS_DB",
@@ -158,6 +167,30 @@ Example `wrangler.jsonc`:
   }
 }
 ```
+
+## Cron Trigger Setup
+
+Configure the dispatcher tick in `triggers.crons`.
+Each entry is a Cloudflare Cron Trigger expression, and each match invokes your exported `scheduled()` handler.
+
+Example:
+
+```jsonc
+{
+  "triggers": {
+    "crons": ["* * * * *"]
+  }
+}
+```
+
+Recommended default:
+
+* use `* * * * *` to run once per minute
+* keep `scheduled()` wired to `runtime.dispatchScheduled(resources(env))`
+* treat the Worker cron as a dispatcher tick, not as the job rule itself
+
+That means the Worker cron does not describe individual recurring jobs.
+Individual recurring jobs are stored with `jobs.createSchedule({ scheduleType: "cron", scheduleExpr, ... })`.
 
 ## Handler And Definition Rules
 

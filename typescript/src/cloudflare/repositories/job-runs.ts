@@ -16,6 +16,7 @@ export function createJobRunRepository(db: D1Database) {
 				.prepare(`INSERT INTO kumofire_job_runs (
 \tid,
 \tjob_id,
+\tjob_schedule_id,
 \tjob_name,
 \tstatus,
 \tdedupe_key,
@@ -28,10 +29,11 @@ export function createJobRunRepository(db: D1Database) {
 \tstarted_at,
 \tfinished_at,
 \tlast_error
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 				.bind(
 					jobRun.id,
 					jobRun.jobId,
+					jobRun.scheduleId ?? null,
 					jobRun.jobName,
 					jobRun.status,
 					jobRun.dedupeKey ?? null,
@@ -67,6 +69,7 @@ export function createJobRunRepository(db: D1Database) {
 				.prepare(`SELECT
 \tid,
 \tjob_id,
+\tjob_schedule_id,
 \tjob_name,
 \tstatus,
 \tdedupe_key,

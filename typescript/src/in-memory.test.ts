@@ -71,6 +71,42 @@ describe("in-memory adapter", () => {
 		});
 	});
 
+	it("materializes cron schedules into queued runs during dispatch", async () => {
+		let now = new Date("2026-03-25T00:00:00.000Z");
+		const storage = createInMemoryStorageAdapter();
+		const queue = createInMemoryQueueAdapter();
+		const jobs = createJobs({
+			storage,
+			queue,
+			now: () => now,
+			handlers: {
+				report: () => {},
+			},
+		});
+
+		const { scheduleId } = await jobs.createSchedule({
+			name: "report",
+			payload: { reportId: "weekly" },
+			scheduleType: "cron",
+			scheduleExpr: "*/5 * * * *",
+		});
+
+		expect(scheduleId).toBe("job_schedule_1");
+		expect(queue.messages).toEqual([]);
+
+		now = new Date("2026-03-25T00:05:00.000Z");
+		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
+		expect(queue.messages).toEqual([{ version: 1, jobRunId: "job_run_1" }]);
+		await expect(storage.getRun("job_run_1")).resolves.toMatchObject({
+			id: "job_run_1",
+			jobId: "report",
+			jobName: "report",
+			scheduleId,
+			status: "queued",
+			scheduledFor: "2026-03-25T00:05:00.000Z",
+		});
+	});
+
 	it("marks a job as succeeded after the handler completes", async () => {
 		const now = new Date("2026-03-25T00:00:00.000Z");
 		const storage = createInMemoryStorageAdapter();

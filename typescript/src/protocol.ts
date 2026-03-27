@@ -27,12 +27,15 @@ export type JobScheduleType = "once" | "interval" | "cron";
 export interface JobSchedule {
 	id: string;
 	jobId: string;
+	jobName: string;
 	scheduleType: JobScheduleType;
 	scheduleExpr: string;
 	timezone: string | null;
 	nextRunAt: string | null;
 	lastScheduledAt: string | null;
 	enabled: boolean;
+	payload: JsonValue;
+	maxAttempts: number;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -80,6 +83,18 @@ export interface CreateJobInput<TPayload extends JsonValue = JsonValue> {
 	dedupeKey?: string;
 }
 
+export interface CreateJobScheduleInput<
+	TPayload extends JsonValue = JsonValue,
+> {
+	name: string;
+	payload: TPayload;
+	scheduleType: JobScheduleType;
+	scheduleExpr: string;
+	timezone?: string | null;
+	maxAttempts?: number;
+	enabled?: boolean;
+}
+
 export interface RetryPolicy {
 	maxAttempts: number;
 	getNextRunAt: (params: {
@@ -107,6 +122,17 @@ export interface JobStorageAdapter {
 	createDefinition?(definition: JobDefinition): Promise<JobDefinition>;
 	getDefinition?(jobId: string): Promise<JobDefinition | null>;
 	getDefinitionByName?(jobName: string): Promise<JobDefinition | null>;
+	createSchedule?(schedule: Omit<JobSchedule, "id">): Promise<JobSchedule>;
+	listDueSchedules?(params: {
+		now: Date;
+		limit: number;
+	}): Promise<JobSchedule[]>;
+	advanceSchedule?(params: {
+		scheduleId: string;
+		now: Date;
+		lastScheduledAt: string;
+		nextRunAt: string | null;
+	}): Promise<JobSchedule | null>;
 	createRun(jobRun: Omit<JobRun, "id">): Promise<JobRun>;
 	getRun(jobRunId: string): Promise<JobRun | null>;
 	getRunByDedupeKey(dedupeKey: string): Promise<JobRun | null>;

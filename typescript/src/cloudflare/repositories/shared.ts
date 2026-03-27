@@ -2,6 +2,8 @@ import type {
 	JobDefinition,
 	JobRun,
 	JobRunStatus,
+	JobSchedule,
+	JobScheduleType,
 	JsonValue,
 } from "../../protocol";
 import type { D1Database, D1RunResult } from "../index";
@@ -19,6 +21,7 @@ export interface D1DefinitionRow {
 export interface D1JobRunRow {
 	id: string;
 	job_id: string;
+	job_schedule_id: string | null;
 	job_name: string;
 	status: JobRunStatus;
 	dedupe_key: string | null;
@@ -31,6 +34,22 @@ export interface D1JobRunRow {
 	started_at: string | null;
 	finished_at: string | null;
 	last_error: string | null;
+}
+
+export interface D1JobScheduleRow {
+	id: string;
+	job_id: string;
+	job_name: string;
+	schedule_type: JobScheduleType;
+	schedule_expr: string;
+	timezone: string | null;
+	next_run_at: string | null;
+	last_scheduled_at: string | null;
+	enabled: number;
+	payload: string;
+	max_attempts: number;
+	created_at: string;
+	updated_at: string;
 }
 
 export function normalizeChanges(result: D1RunResult): number {
@@ -76,7 +95,26 @@ export function mapJobRunRow(row: D1JobRunRow): JobRun {
 		startedAt: row.started_at,
 		finishedAt: row.finished_at,
 		lastError: row.last_error,
+		...(row.job_schedule_id ? { scheduleId: row.job_schedule_id } : {}),
 		...(row.dedupe_key ? { dedupeKey: row.dedupe_key } : {}),
+	};
+}
+
+export function mapJobScheduleRow(row: D1JobScheduleRow): JobSchedule {
+	return {
+		id: row.id,
+		jobId: row.job_id,
+		jobName: row.job_name,
+		scheduleType: row.schedule_type,
+		scheduleExpr: row.schedule_expr,
+		timezone: row.timezone,
+		nextRunAt: row.next_run_at,
+		lastScheduledAt: row.last_scheduled_at,
+		enabled: row.enabled === 1,
+		payload: parsePayload(row.payload),
+		maxAttempts: row.max_attempts,
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
 	};
 }
 
@@ -118,6 +156,7 @@ export async function fetchJobRunBy(
 		.prepare(`SELECT
 \tid,
 \tjob_id,
+\tjob_schedule_id,
 \tjob_name,
 \tstatus,
 \tdedupe_key,
@@ -137,4 +176,33 @@ LIMIT 1`)
 		.first<D1JobRunRow>();
 
 	return row ? mapJobRunRow(row) : null;
+}
+
+export async function fetchJobScheduleBy(
+	db: D1Database,
+	whereClause: string,
+	values: unknown[],
+): Promise<JobSchedule | null> {
+	const row = await db
+		.prepare(`SELECT
+\tid,
+\tjob_id,
+\tjob_name,
+\tschedule_type,
+\tschedule_expr,
+\ttimezone,
+\tnext_run_at,
+\tlast_scheduled_at,
+\tenabled,
+\tpayload,
+\tmax_attempts,
+\tcreated_at,
+\tupdated_at
+FROM kumofire_job_schedules
+WHERE ${whereClause}
+LIMIT 1`)
+		.bind(...values)
+		.first<D1JobScheduleRow>();
+
+	return row ? mapJobScheduleRow(row) : null;
 }

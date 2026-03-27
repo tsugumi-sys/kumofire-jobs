@@ -108,6 +108,27 @@ export default {
 };
 ```
 
+For a one-shot delayed job, use `runAt`:
+
+```ts
+await jobs.create({
+  name: "email",
+  payload: { to: "user@example.com" },
+  runAt: new Date("2026-03-27T01:00:00.000Z"),
+});
+```
+
+For a recurring job, create a cron schedule:
+
+```ts
+await jobs.createSchedule({
+  name: "email",
+  payload: { to: "user@example.com" },
+  scheduleType: "cron",
+  scheduleExpr: "*/5 * * * *",
+});
+```
+
 To dispatch ready jobs automatically, add a Cron Trigger to your Worker configuration:
 
 ```jsonc
@@ -118,19 +139,21 @@ To dispatch ready jobs automatically, add a Cron Trigger to your Worker configur
 }
 ```
 
-That will invoke `scheduled()` every minute so due jobs are picked up from D1 and sent to the queue.
+Put this in your `wrangler.jsonc` or `wrangler.toml` for the Worker that exports `scheduled()`.
+Cloudflare invokes `scheduled()` for each configured expression, and `runtime.dispatchScheduled(...)` should be called from that handler.
 
-The migration CLI:
+This Worker cron is a dispatcher tick.
+It is not the per-job schedule itself.
+Per-job recurring schedules are created with `jobs.createSchedule({ scheduleType: "cron", scheduleExpr, ... })`.
 
-* checks the current D1 schema version
-* compares it with the library-required version
-* prints the exact Wrangler command before apply
-* asks for confirmation unless `--yes` is set
+With `["* * * * *"]`, the dispatcher runs every minute:
+
+* delayed runs with `runAt` in the past are picked up from D1
+* due recurring schedules are materialized into runs
+* due runs are moved to the queue automatically
 
 ## See More Details
 
-* [TypeScript package](https://github.com/tsugumi-sys/kumofire-jobs/tree/main/typescript)
-* [Cloudflare runtime guide](https://github.com/tsugumi-sys/kumofire-jobs/blob/main/docs/cloudflare/README.md)
-* [Cloudflare migration guide](https://github.com/tsugumi-sys/kumofire-jobs/blob/main/docs/cloudflare/migration.md)
-* [Cloudflare migration CLI proposal](https://github.com/tsugumi-sys/kumofire-jobs/blob/main/docs/cloudflare/migration-cli.md)
 * [Cloudflare example](https://github.com/tsugumi-sys/kumofire-jobs/tree/main/examples/cloudflare)
+* [Cloudflare migration guide](https://github.com/tsugumi-sys/kumofire-jobs/blob/main/docs/cloudflare/migration.md)
+* [TypeScript package](https://github.com/tsugumi-sys/kumofire-jobs/tree/main/typescript)

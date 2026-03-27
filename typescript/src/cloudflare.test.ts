@@ -30,6 +30,7 @@ interface StoredDefinitionRow {
 interface StoredJobRunRow {
 	id: string;
 	job_id: string;
+	job_schedule_id: string | null;
 	job_name: string;
 	status:
 		| "scheduled"
@@ -48,6 +49,22 @@ interface StoredJobRunRow {
 	started_at: string | null;
 	finished_at: string | null;
 	last_error: string | null;
+}
+
+interface StoredJobScheduleRow {
+	id: string;
+	job_id: string;
+	job_name: string;
+	schedule_type: "once" | "interval" | "cron";
+	schedule_expr: string;
+	timezone: string | null;
+	next_run_at: string | null;
+	last_scheduled_at: string | null;
+	enabled: number;
+	payload: string;
+	max_attempts: number;
+	created_at: string;
+	updated_at: string;
 }
 
 class FakeD1PreparedStatement implements D1PreparedStatement {
@@ -99,6 +116,7 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 class FakeD1Database implements D1Database {
 	private readonly definitions = new Map<string, StoredDefinitionRow>();
 	private readonly definitionsByName = new Map<string, string>();
+	private readonly schedules = new Map<string, StoredJobScheduleRow>();
 	private readonly jobRuns = new Map<string, StoredJobRunRow>();
 	private readonly locks = new Map<string, { leaseUntil: string }>();
 
@@ -172,6 +190,17 @@ class FakeD1Database implements D1Database {
 		}
 
 		if (
+			normalized.includes("FROM kumofire_job_schedules WHERE id = ? LIMIT 1")
+		) {
+			const scheduleId = values[0];
+			if (typeof scheduleId !== "string") {
+				return null;
+			}
+
+			return (this.schedules.get(scheduleId) ?? null) as T | null;
+		}
+
+		if (
 			normalized.includes("FROM kumofire_job_runs WHERE dedupe_key = ? LIMIT 1")
 		) {
 			const dedupeKey = values[0];
@@ -193,28 +222,48 @@ class FakeD1Database implements D1Database {
 
 	allRows<T>(query: string, values: unknown[]): T[] {
 		const normalized = normalizeSql(query);
-		if (
-			!normalized.includes("FROM kumofire_job_runs WHERE status = 'scheduled'")
-		) {
-			throw new Error(`Unsupported all() query: ${normalized}`);
-		}
-
 		const now = values[0];
 		const limit = values[1];
 		if (typeof now !== "string" || typeof limit !== "number") {
 			throw new Error("Invalid dispatch query bindings");
 		}
 
-		return [...this.jobRuns.values()]
-			.filter(
-				(jobRun) =>
-					jobRun.status === "scheduled" &&
-					jobRun.next_run_at !== null &&
-					jobRun.next_run_at <= now,
-			)
-			.sort((left, right) => left.created_at.localeCompare(right.created_at))
-			.slice(0, limit)
-			.map((jobRun) => ({ ...jobRun }) as T);
+		if (
+			normalized.includes("FROM kumofire_job_runs WHERE status = 'scheduled'")
+		) {
+			return [...this.jobRuns.values()]
+				.filter(
+					(jobRun) =>
+						jobRun.status === "scheduled" &&
+						jobRun.next_run_at !== null &&
+						jobRun.next_run_at <= now,
+				)
+				.sort((left, right) => left.created_at.localeCompare(right.created_at))
+				.slice(0, limit)
+				.map((jobRun) => ({ ...jobRun }) as T);
+		}
+
+		if (normalized.includes("FROM kumofire_job_schedules WHERE enabled = 1")) {
+			return [...this.schedules.values()]
+				.filter(
+					(schedule) =>
+						schedule.enabled === 1 &&
+						schedule.next_run_at !== null &&
+						schedule.next_run_at <= now,
+				)
+				.sort((left, right) => {
+					const nextRunOrder = (left.next_run_at ?? "").localeCompare(
+						right.next_run_at ?? "",
+					);
+					return nextRunOrder !== 0
+						? nextRunOrder
+						: left.created_at.localeCompare(right.created_at);
+				})
+				.slice(0, limit)
+				.map((schedule) => ({ ...schedule }) as T);
+		}
+
+		throw new Error(`Unsupported all() query: ${normalized}`);
 	}
 
 	allResult<T>(query: string, values: unknown[]): D1RunResult<T> {
@@ -268,6 +317,7 @@ class FakeD1Database implements D1Database {
 			const [
 				id,
 				jobId,
+				jobScheduleId,
 				jobName,
 				status,
 				dedupeKey,
@@ -285,6 +335,7 @@ class FakeD1Database implements D1Database {
 			this.jobRuns.set(String(id), {
 				id: String(id),
 				job_id: String(jobId),
+				job_schedule_id: asNullableString(jobScheduleId),
 				job_name: String(jobName),
 				status: status as StoredJobRunRow["status"],
 				dedupe_key: asNullableString(dedupeKey),
@@ -297,6 +348,42 @@ class FakeD1Database implements D1Database {
 				started_at: asNullableString(startedAt),
 				finished_at: asNullableString(finishedAt),
 				last_error: asNullableString(lastError),
+			});
+
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
+		}
+
+		if (normalized.startsWith("INSERT INTO kumofire_job_schedules")) {
+			const [
+				id,
+				jobId,
+				jobName,
+				scheduleType,
+				scheduleExpr,
+				timezone,
+				nextRunAt,
+				lastScheduledAt,
+				enabled,
+				payload,
+				maxAttempts,
+				createdAt,
+				updatedAt,
+			] = values;
+
+			this.schedules.set(String(id), {
+				id: String(id),
+				job_id: String(jobId),
+				job_name: String(jobName),
+				schedule_type: scheduleType as StoredJobScheduleRow["schedule_type"],
+				schedule_expr: String(scheduleExpr),
+				timezone: asNullableString(timezone),
+				next_run_at: asNullableString(nextRunAt),
+				last_scheduled_at: asNullableString(lastScheduledAt),
+				enabled: Number(enabled),
+				payload: String(payload),
+				max_attempts: Number(maxAttempts),
+				created_at: String(createdAt),
+				updated_at: String(updatedAt),
 			});
 
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
@@ -421,6 +508,37 @@ class FakeD1Database implements D1Database {
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
 
+		if (
+			normalized.includes(
+				"UPDATE kumofire_job_schedules SET last_scheduled_at =",
+			)
+		) {
+			const [
+				lastScheduledAt,
+				nextRunAt,
+				updatedAt,
+				scheduleId,
+				expectedNextRunAt,
+			] = values;
+			const schedule = this.schedules.get(String(scheduleId));
+			if (
+				!schedule ||
+				schedule.enabled !== 1 ||
+				schedule.next_run_at !== String(expectedNextRunAt)
+			) {
+				return {
+					success: true,
+					meta: createD1Meta({ changes: 0 }),
+					results: [],
+				};
+			}
+
+			schedule.last_scheduled_at = String(lastScheduledAt);
+			schedule.next_run_at = asNullableString(nextRunAt);
+			schedule.updated_at = String(updatedAt);
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
+		}
+
 		throw new Error(`Unsupported run() query: ${normalized}`);
 	}
 
@@ -451,6 +569,15 @@ class FakeD1Database implements D1Database {
 
 	seedJobRun(jobRun: StoredJobRunRow): void {
 		this.jobRuns.set(jobRun.id, { ...jobRun });
+	}
+
+	getJobSchedule(id: string): StoredJobScheduleRow | null {
+		const schedule = this.schedules.get(id);
+		return schedule ? { ...schedule } : null;
+	}
+
+	seedJobSchedule(schedule: StoredJobScheduleRow): void {
+		this.schedules.set(schedule.id, { ...schedule });
 	}
 
 	seedLock(jobRunId: string, leaseUntil: string): void {
@@ -514,6 +641,7 @@ describe("cloudflare adapters", () => {
 			"CREATE TABLE IF NOT EXISTS kumofire_job_definitions",
 		);
 		expect(sql).toContain("CREATE TABLE IF NOT EXISTS kumofire_job_runs");
+		expect(sql).toContain("CREATE TABLE IF NOT EXISTS kumofire_job_schedules");
 		expect(sql).toContain("CREATE TABLE IF NOT EXISTS kumofire_job_locks");
 		expect(sql).toContain("CREATE TABLE IF NOT EXISTS kumofire_schema_version");
 		expect(sql).toContain("INSERT INTO kumofire_schema_version");
@@ -747,6 +875,58 @@ describe("cloudflare adapters", () => {
 		]);
 	});
 
+	it("materializes cron schedules through the D1 storage adapter", async () => {
+		let now = new Date("2026-03-25T00:00:00.000Z");
+		const db = new FakeD1Database();
+		const queueMessages: JobRunMessage[] = [];
+		const jobs = createJobs({
+			storage: createD1StorageAdapter({ db }),
+			queue: createCloudflareQueueAdapter(
+				createQueueBinding(async (message) => {
+					queueMessages.push(message);
+				}),
+			),
+			now: () => now,
+			handlers: {
+				report: () => {},
+			},
+		});
+
+		const { scheduleId } = await jobs.createSchedule({
+			name: "report",
+			payload: { reportId: "weekly" },
+			scheduleType: "cron",
+			scheduleExpr: "*/5 * * * *",
+		});
+
+		expect(db.getJobSchedule(scheduleId)).toMatchObject({
+			id: scheduleId,
+			job_id: "report",
+			job_name: "report",
+			schedule_type: "cron",
+			schedule_expr: "*/5 * * * *",
+		});
+
+		now = new Date("2026-03-25T00:05:00.000Z");
+		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
+		expect(queueMessages).toEqual([
+			{ version: 1, jobRunId: expect.any(String) },
+		]);
+		const firstRunId = queueMessages[0]?.jobRunId;
+		if (!firstRunId) {
+			throw new Error("expected a queue message");
+		}
+
+		expect(db.getJobRun(firstRunId)).toMatchObject({
+			id: firstRunId,
+			job_id: "report",
+			job_schedule_id: scheduleId,
+			job_name: "report",
+			status: "queued",
+			next_run_at: "2026-03-25T00:05:00.000Z",
+		});
+	});
+
 	it("surfaces malformed stored payload rows from D1", async () => {
 		const db = new FakeD1Database();
 		db.seedDefinition({
@@ -761,6 +941,7 @@ describe("cloudflare adapters", () => {
 		db.seedJobRun({
 			id: "job_run_1",
 			job_id: "email",
+			job_schedule_id: null,
 			job_name: "email",
 			status: "queued",
 			dedupe_key: null,
@@ -875,7 +1056,7 @@ describe("cloudflare adapters", () => {
 				payload: { to: "user@example.com" },
 			}),
 		).rejects.toThrow(
-			"Schema version 0 does not satisfy required version 1. Apply Kumofire Jobs migrations.",
+			"Schema version 0 does not satisfy required version 2. Apply Kumofire Jobs migrations.",
 		);
 	});
 });
@@ -911,6 +1092,38 @@ describe("cloudflare runtime", () => {
 			dispatched: 1,
 		});
 		expect(queueMessages).toEqual([{ version: 1, jobRunId: jobId }]);
+	});
+
+	it("dispatches materialized cron schedules through explicit db and queue bindings", async () => {
+		let now = new Date("2026-03-25T00:00:00.000Z");
+		const db = new FakeD1Database();
+		const queueMessages: JobRunMessage[] = [];
+		const runtime = createCloudflareRuntime({
+			now: () => now,
+			handlers: {
+				report: () => {},
+			},
+		});
+		const resources = {
+			db,
+			queue: createQueueBinding(async (message: JobRunMessage) => {
+				queueMessages.push(message);
+			}),
+		};
+
+		const jobs = runtime.bind(resources);
+		await jobs.createSchedule({
+			name: "report",
+			payload: { reportId: "weekly" },
+			scheduleType: "cron",
+			scheduleExpr: "*/5 * * * *",
+		});
+
+		now = new Date("2026-03-25T00:05:00.000Z");
+		await expect(runtime.dispatchScheduled(resources)).resolves.toEqual({
+			dispatched: 1,
+		});
+		expect(queueMessages).toHaveLength(1);
 	});
 
 	it("stays decoupled from Worker env shape", async () => {

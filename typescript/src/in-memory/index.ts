@@ -3,14 +3,17 @@ import type {
 	JobQueueAdapter,
 	JobRun,
 	JobRunMessage,
+	JobSchedule,
 	JobStorageAdapter,
 } from "../protocol";
 
 type StoredJobRun = JobRun & { id: string };
+type StoredJobSchedule = JobSchedule & { id: string };
 
 export interface InMemoryStorageAdapter extends JobStorageAdapter {
 	seedDefinition(definition: JobDefinition): Promise<void>;
 	seed(jobRun: StoredJobRun): Promise<void>;
+	seedSchedule(schedule: StoredJobSchedule): Promise<void>;
 }
 
 export interface InMemoryQueueAdapter extends JobQueueAdapter {
@@ -19,8 +22,10 @@ export interface InMemoryQueueAdapter extends JobQueueAdapter {
 
 export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 	let sequence = 0;
+	let scheduleSequence = 0;
 	const definitions = new Map<string, JobDefinition>();
 	const definitionsByName = new Map<string, string>();
+	const schedules = new Map<string, StoredJobSchedule>();
 	const jobRuns = new Map<string, StoredJobRun>();
 	const dedupeIndex = new Map<string, string>();
 	const locks = new Map<string, { leaseUntil: number }>();
@@ -28,6 +33,11 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 	function generateRunId(): string {
 		sequence += 1;
 		return `job_run_${sequence}`;
+	}
+
+	function generateScheduleId(): string {
+		scheduleSequence += 1;
+		return `job_schedule_${scheduleSequence}`;
 	}
 
 	return {
@@ -41,6 +51,10 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 			if (jobRun.dedupeKey) {
 				dedupeIndex.set(jobRun.dedupeKey, jobRun.id);
 			}
+		},
+
+		async seedSchedule(schedule) {
+			schedules.set(schedule.id, { ...schedule });
 		},
 
 		async createDefinition(definition) {
@@ -70,6 +84,53 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 
 			const definition = definitions.get(definitionId);
 			return definition ? { ...definition } : null;
+		},
+
+		async createSchedule(schedule) {
+			const createdSchedule: StoredJobSchedule = {
+				...schedule,
+				id: generateScheduleId(),
+			};
+
+			schedules.set(createdSchedule.id, createdSchedule);
+			return { ...createdSchedule };
+		},
+
+		async listDueSchedules({ now, limit }) {
+			return [...schedules.values()]
+				.filter(
+					(schedule) =>
+						schedule.enabled &&
+						schedule.nextRunAt !== null &&
+						new Date(schedule.nextRunAt).getTime() <= now.getTime(),
+				)
+				.sort((left, right) => {
+					const leftNextRunAt = left.nextRunAt ?? "";
+					const rightNextRunAt = right.nextRunAt ?? "";
+					return leftNextRunAt.localeCompare(rightNextRunAt);
+				})
+				.slice(0, limit)
+				.map((schedule) => ({ ...schedule }));
+		},
+
+		async advanceSchedule({ scheduleId, now, lastScheduledAt, nextRunAt }) {
+			const schedule = schedules.get(scheduleId);
+			if (
+				!schedule ||
+				!schedule.enabled ||
+				schedule.nextRunAt !== lastScheduledAt
+			) {
+				return null;
+			}
+
+			const updated: StoredJobSchedule = {
+				...schedule,
+				lastScheduledAt,
+				nextRunAt,
+				updatedAt: now.toISOString(),
+			};
+			schedules.set(scheduleId, updated);
+			return { ...updated };
 		},
 
 		async createRun(jobRun) {

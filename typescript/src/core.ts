@@ -1,6 +1,8 @@
+import { getNextCronOccurrence } from "./cron";
 import type {
 	ConsumeResult,
 	CreateJobInput,
+	CreateJobScheduleInput,
 	CreateJobsOptions,
 	DispatchResult,
 	JobDefinition,
@@ -8,6 +10,7 @@ import type {
 	JobRun,
 	JobRunMessage,
 	JobRunStatusView,
+	JobSchedule,
 	JsonValue,
 	RetryPolicy,
 } from "./protocol";
@@ -16,6 +19,7 @@ const DEFAULT_LEASE_MS = 30_000;
 export const jobMessageVersion = 1 as const;
 
 type StoredJobRun = JobRun & { id: string };
+type StoredJobSchedule = JobSchedule & { id: string };
 
 function defaultRetryPolicy(): RetryPolicy {
 	return {
@@ -71,6 +75,41 @@ function toStatusView(jobRun: StoredJobRun): JobRunStatusView {
 		finishedAt: jobRun.finishedAt,
 		lastError: jobRun.lastError,
 	};
+}
+
+function requireScheduleId(jobSchedule: JobSchedule): string {
+	if (!jobSchedule.id) {
+		throw new Error("Job schedule is missing id");
+	}
+
+	return jobSchedule.id;
+}
+
+function requireStoredJobSchedule(jobSchedule: JobSchedule): StoredJobSchedule {
+	const id = requireScheduleId(jobSchedule);
+	return { ...jobSchedule, id };
+}
+
+function requireScheduleSupport(
+	options: CreateJobsOptions<JobHandlerMap>,
+): asserts options is CreateJobsOptions<JobHandlerMap> & {
+	storage: NonNullable<
+		Pick<
+			CreateJobsOptions<JobHandlerMap>["storage"],
+			"createSchedule" | "listDueSchedules" | "advanceSchedule"
+		>
+	> &
+		CreateJobsOptions<JobHandlerMap>["storage"];
+} {
+	if (
+		!options.storage.createSchedule ||
+		!options.storage.listDueSchedules ||
+		!options.storage.advanceSchedule
+	) {
+		throw new Error(
+			"Job schedule support is not available for this storage adapter",
+		);
+	}
 }
 
 function buildDefinitions<THandlers extends JobHandlerMap>(
@@ -224,12 +263,126 @@ export function createJobs<THandlers extends JobHandlerMap>(
 			return { jobId: storedJobRun.id };
 		},
 
+		async createSchedule<TPayload extends JsonValue>(
+			input: CreateJobScheduleInput<TPayload>,
+		): Promise<{ scheduleId: string }> {
+			await ensureSchemaVersion();
+			await ensureDefinitions();
+			requireScheduleSupport(options);
+
+			if (input.scheduleType !== "cron") {
+				throw new Error(
+					`Unsupported schedule type "${input.scheduleType}". Only "cron" is currently implemented.`,
+				);
+			}
+
+			const now = getNow();
+			const definition = await resolveDefinitionByName(input.name);
+			const createSchedule = options.storage.createSchedule;
+			if (!createSchedule) {
+				throw new Error(
+					"Job schedule support is not available for this storage adapter",
+				);
+			}
+			const nextRunAt =
+				input.enabled === false
+					? null
+					: getNextCronOccurrence(
+							input.scheduleExpr,
+							now,
+							input.timezone ?? null,
+						).toISOString();
+			const schedule = await createSchedule({
+				jobId: definition.id,
+				jobName: definition.name,
+				scheduleType: input.scheduleType,
+				scheduleExpr: input.scheduleExpr,
+				timezone: input.timezone ?? null,
+				nextRunAt,
+				lastScheduledAt: null,
+				enabled: input.enabled ?? true,
+				payload: input.payload,
+				maxAttempts: input.maxAttempts ?? retry.maxAttempts,
+				createdAt: now.toISOString(),
+				updatedAt: now.toISOString(),
+			});
+
+			return { scheduleId: requireScheduleId(schedule) };
+		},
+
 		async dispatch(input?: { limit?: number }): Promise<DispatchResult> {
 			await ensureSchemaVersion();
 			await ensureDefinitions();
 
 			const now = getNow();
 			const limit = input?.limit ?? 100;
+			let dispatched = 0;
+
+			if (options.storage.listDueSchedules && options.storage.advanceSchedule) {
+				const schedules = await options.storage.listDueSchedules({
+					now,
+					limit,
+				});
+
+				for (const schedule of schedules) {
+					const storedSchedule = requireStoredJobSchedule(schedule);
+					if (storedSchedule.nextRunAt === null) {
+						continue;
+					}
+
+					const scheduledFor = storedSchedule.nextRunAt;
+					const nextRunAt =
+						storedSchedule.scheduleType === "cron"
+							? getNextCronOccurrence(
+									storedSchedule.scheduleExpr,
+									new Date(scheduledFor),
+									storedSchedule.timezone,
+								).toISOString()
+							: null;
+					const advancedSchedule = await options.storage.advanceSchedule({
+						scheduleId: storedSchedule.id,
+						now,
+						lastScheduledAt: scheduledFor,
+						nextRunAt,
+					});
+
+					if (!advancedSchedule) {
+						continue;
+					}
+
+					const createdRun = await options.storage.createRun({
+						jobId: storedSchedule.jobId,
+						jobName: storedSchedule.jobName,
+						status: "scheduled",
+						payload: storedSchedule.payload,
+						attempt: 0,
+						maxAttempts: storedSchedule.maxAttempts,
+						scheduledFor,
+						createdAt: now.toISOString(),
+						updatedAt: now.toISOString(),
+						startedAt: null,
+						finishedAt: null,
+						lastError: null,
+						scheduleId: storedSchedule.id,
+					});
+					const storedRun = requireStoredJobRun(createdRun);
+					const queuedRun = await options.storage.markQueued({
+						jobRunId: storedRun.id,
+						now,
+					});
+
+					if (!queuedRun) {
+						continue;
+					}
+
+					await options.queue.send({
+						version: jobMessageVersion,
+						jobRunId: storedRun.id,
+					});
+					dispatched += 1;
+				}
+			}
+
 			const jobRuns = await options.storage.listDispatchableJobs({
 				now,
 				limit,
@@ -248,9 +401,10 @@ export function createJobs<THandlers extends JobHandlerMap>(
 					version: jobMessageVersion,
 					jobRunId: storedJobRun.id,
 				});
+				dispatched += 1;
 			}
 
-			return { dispatched: jobRuns.length };
+			return { dispatched };
 		},
 
 		async consume(message: JobRunMessage): Promise<ConsumeResult> {

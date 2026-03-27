@@ -2,6 +2,7 @@ import type { JobRun, JobStorageAdapter } from "../protocol";
 import type { D1Database } from "./index";
 import { createDefinitionRepository } from "./repositories/definitions";
 import { createJobRunRepository } from "./repositories/job-runs";
+import { createJobScheduleRepository } from "./repositories/job-schedules";
 import { createLeaseRepository } from "./repositories/leases";
 import { createSchemaVersionRepository } from "./repositories/schema-version";
 import { requiredSchemaVersion } from "./schema";
@@ -13,6 +14,7 @@ export function createD1StorageAdapter(params: {
 	const schemaVersion = params.requiredSchemaVersion ?? requiredSchemaVersion;
 	const schemaVersionRepository = createSchemaVersionRepository(params.db);
 	const definitionRepository = createDefinitionRepository(params.db);
+	const jobScheduleRepository = createJobScheduleRepository(params.db);
 	const jobRunRepository = createJobRunRepository(params.db);
 	const leaseRepository = createLeaseRepository(params.db);
 
@@ -36,6 +38,28 @@ export function createD1StorageAdapter(params: {
 
 		getDefinitionByName(jobName) {
 			return definitionRepository.getByName(jobName);
+		},
+
+		createSchedule(schedule) {
+			const createdSchedule = {
+				...schedule,
+				id: crypto.randomUUID(),
+			};
+
+			return jobScheduleRepository.create(createdSchedule);
+		},
+
+		listDueSchedules({ now, limit }) {
+			return jobScheduleRepository.listDue({ now, limit });
+		},
+
+		advanceSchedule({ scheduleId, now, lastScheduledAt, nextRunAt }) {
+			return jobScheduleRepository.advance({
+				scheduleId,
+				now,
+				lastScheduledAt,
+				nextRunAt,
+			});
 		},
 
 		createRun(jobRun) {
