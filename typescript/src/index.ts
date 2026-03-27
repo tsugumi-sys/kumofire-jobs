@@ -32,6 +32,7 @@ export {
 export type {
 	ConsumeResult,
 	CreateJobInput,
+	CreateJobScheduleInput,
 	CreateJobsOptions,
 	DispatchResult,
 	JobDefinition,

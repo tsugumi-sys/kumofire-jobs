@@ -30,14 +30,19 @@ The example Wrangler config includes:
 
 * `triggers.crons = ["* * * * *"]`
   * runs the `scheduled()` handler every minute
+  * materializes due recurring schedules
   * picks up ready jobs and enqueues them automatically
+
+Recurring job rules are created in application code with `jobs.createSchedule(...)`.
+The Worker cron only controls how often the dispatcher scans D1.
 
 ## Setup
 
 1. Install dependencies.
 2. Create a D1 database and a Queue.
 3. Update `wrangler.jsonc` with the real D1 database id.
-4. Apply Kumofire Jobs migrations before running the Worker.
+4. Keep or adjust `triggers.crons` for how often you want dispatch to run.
+5. Apply Kumofire Jobs migrations before running the Worker.
 
 Example:
 

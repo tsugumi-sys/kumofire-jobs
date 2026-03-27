@@ -110,13 +110,13 @@ describe("cloudflare cli migrate command", () => {
 		);
 
 		expect(executions).toHaveLength(2);
-		expect(logs).toContain("Pending migrations: 1");
+		expect(logs).toContain("Pending migrations: 2");
 		expect(
 			logs.some((line) =>
 				line.startsWith("wrangler d1 execute jobs-db --remote"),
 			),
 		).toBe(true);
-		expect(logs.at(-1)).not.toBe("Done. Schema version is now 1.");
+		expect(logs.at(-1)).not.toBe("Done. Schema version is now 2.");
 	});
 
 	it("prompts and applies pending migrations", async () => {
@@ -135,6 +135,11 @@ describe("cloudflare cli migrate command", () => {
 					exitCode: 0,
 				},
 				{
+					stdout: "",
+					stderr: "",
+					exitCode: 0,
+				},
+				{
 					stdout: JSON.stringify({
 						results: [{ kumofire_table_exists: 1 }],
 					}),
@@ -143,7 +148,7 @@ describe("cloudflare cli migrate command", () => {
 				},
 				{
 					stdout: JSON.stringify({
-						results: [{ kumofire_version: 1 }],
+						results: [{ kumofire_version: 2 }],
 					}),
 					stderr: "",
 					exitCode: 0,
@@ -156,13 +161,18 @@ describe("cloudflare cli migrate command", () => {
 			deps,
 		);
 
-		expect(executions).toHaveLength(4);
+		expect(executions).toHaveLength(5);
 		expect(executions[1]).toMatchObject({
 			command: "wrangler",
 			args: expect.arrayContaining(["--local", "--yes"]),
 		});
+		expect(executions[2]).toMatchObject({
+			command: "wrangler",
+			args: expect.arrayContaining(["--local", "--yes"]),
+		});
 		expect(logs).toContain("Applying migration 1: init");
-		expect(logs).toContain("Done. Schema version is now 1.");
+		expect(logs).toContain("Applying migration 2: job_schedules");
+		expect(logs).toContain("Done. Schema version is now 2.");
 	});
 
 	it("fails in non-interactive mode without --yes", async () => {
