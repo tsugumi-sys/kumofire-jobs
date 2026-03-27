@@ -33,25 +33,38 @@ Kumofire Jobs centralizes that lifecycle into one reusable module so projects ca
 ## How It Works On Cloudflare
 
 This library is queue-based.
+On Cloudflare, your Worker exposes `fetch()`, `scheduled()`, and `queue()`.
+`fetch()` registers jobs in D1, Cloudflare Cron triggers the dispatcher on `scheduled()`, and the dispatcher pushes ready jobs into Cloudflare Queue for the consumer on `queue()` to process.
 
-The execution flow is:
+```
+[ PHASE 1: REGISTRATION ]         [ PHASE 2: DISPATCH ]          [ PHASE 3: EXECUTION ]
+ -------------------------         ---------------------          ----------------------
 
-1. Register a job in D1.
-2. When the job becomes ready, dispatch it to Cloudflare Queues.
-3. Let the queue consumer pick the job and execute the handler.
+ +-----------------------+         +-------------------+          +--------------------+
+ |  Your Worker (API)    |         |  Cloudflare Cron  |          |  Cloudflare Queue  |
+ |  (Registering a job)  |         |  (The heartbeat)  |          |  (The trigger)     |
+ +-----------+-----------+         +---------+---------+          +---------+----------+
+             |                               |                              |
+             | 1. Create Job                 | 2. Periodically              | 4. Pick up
+             v                               v  (Dispatch Tick)             v
+     +-------+-------+               +-------+-------+              +-------+-------+
+     |      D1       | <-----------+ |  Dispatcher   | +----------> |    Consumer   |
+     | (Job Storage) |   3. Find     |  (Runtime)    |   4. Push    |    (Runtime)  |
+     +---------------+      Ready    +---------------+              +-------+-------+
+                            Jobs                                            |
+                                                                            | 5. Run
+                                                                            v
+                                                                    +-------+-------+
+                                                                    |  Your Handler |
+                                                                    |  (Email, etc) |
+                                                                    +---------------+
+```
 
-One-shot jobs are dispatched to the queue immediately when they are created.
-Cron-based jobs become ready based on the stored cron schedule.
-
-On Cloudflare, you also need a Worker Cron Trigger.
-That trigger periodically wakes up the dispatcher so it can:
-
-* find ready one-shot jobs
-* materialize due cron schedules into runs
-* push ready runs into the queue
-
-The Worker cron is a dispatcher tick.
-It is not the job schedule itself.
+| Phase | Component | Behavior |
+| --- | --- | --- |
+| 1. Registration | Your Worker (API) | Register a job and save its payload and execution time in D1. |
+| 2. Dispatch | Cloudflare Cron + Dispatcher | Run the dispatch tick, find ready jobs in D1, and push them into Cloudflare Queue. |
+| 3. Execution | Consumer + Your Handler | Consume queue messages and run your handler code, such as sending an email. |
 
 ## Quick Setup
 
