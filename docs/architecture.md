@@ -25,7 +25,8 @@ Kumofire Jobs assumes the following runtime components:
 * application side
   * manages job definitions
   * creates manual runs where needed
-  * reads run status and history
+  * stores `kumofire_job_run_id` in its own records
+  * reads run status and history through the Kumofire API
 * dispatcher side
   * scans due schedules and due runs
   * creates runs from schedules
@@ -156,6 +157,7 @@ The queue message payload should be minimal.
 
 The queue must not carry the full payload or job state.
 It should only deliver `jobRunId`, while the source of truth remains in the storage adapter.
+It must not expose `jobId`, payload, schedule metadata, or other internal identifiers.
 
 ## Run Status Model
 
@@ -221,6 +223,10 @@ For a manual or one-shot invocation it does the following:
 * only registers the run when `runAt > now`, leaving later dispatch to the dispatcher
 
 When deduplication is used, deduplication applies to run creation, not to the Job definition itself.
+
+The application-facing identifier produced here is the Job Run ID.
+Applications should persist that value in their own records as `kumofire_job_run_id`.
+Applications should not persist or depend on Kumofire internal identifiers beyond that boundary.
 
 ## Schedule Dispatch Protocol
 
@@ -290,8 +296,16 @@ The application owns:
 * handler implementation
 * business results produced by handlers
 * API exposure and authorization
+* its own persistence of `kumofire_job_run_id`
 
-The application reads status through Job Runs and reads final business results from its own tables or storage after completion.
+The application boundary is intentionally narrow:
+
+* Kumofire exposes `jobRunId`
+* the application stores it as `kumofire_job_run_id`
+* the application fetches job status or run details through the Kumofire API using that value
+
+The application should not directly read Kumofire tables with SQL, and should not couple itself to `job_id`, schedule IDs, retry metadata, or queue payload details.
+The application reads final business results from its own tables or storage after completion.
 
 ## Adapters
 
