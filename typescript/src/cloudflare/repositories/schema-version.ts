@@ -1,4 +1,4 @@
-import type { D1Database } from "../index";
+import type { D1Database } from "../types";
 
 export function createSchemaVersionRepository(db: D1Database) {
 	return {

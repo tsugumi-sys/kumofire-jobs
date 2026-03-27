@@ -1,5 +1,5 @@
 import type { JobDefinition } from "../../protocol";
-import type { D1Database } from "../index";
+import type { D1Database } from "../types";
 import { fetchDefinitionBy, requireSuccess, serializePayload } from "./shared";
 
 export function createDefinitionRepository(db: D1Database) {

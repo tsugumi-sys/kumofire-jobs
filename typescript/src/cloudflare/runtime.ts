@@ -13,8 +13,8 @@ import {
 	type CloudflareQueue,
 	createCloudflareQueueAdapter,
 	createD1StorageAdapter,
-	type D1Database,
 } from "./index";
+import type { D1Database } from "./types";
 
 export interface CloudflareQueueMessage<TBody = unknown> {
 	body: TBody;

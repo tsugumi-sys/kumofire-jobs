@@ -1,4 +1,4 @@
-import type { D1Database } from "../index";
+import type { D1Database } from "../types";
 import { normalizeChanges, requireSuccess } from "./shared";
 
 export function createLeaseRepository(db: D1Database) {
