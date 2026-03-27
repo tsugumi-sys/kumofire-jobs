@@ -72,7 +72,7 @@ export interface JobRunStatusView {
 
 export interface JobRunMessage {
 	version: 1;
-	jobRunId: string;
+	kumofireJobRunId: string;
 }
 
 export interface CreateJobInput<TPayload extends JsonValue = JsonValue> {

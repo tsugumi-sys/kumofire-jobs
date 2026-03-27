@@ -16,7 +16,7 @@ This example shows a minimal Worker product built with:
   * create an email job
 * `POST /jobs/fail-always`
   * create a job that always throws
-* `GET /jobs/:jobId`
+* `GET /jobs/:kumofireJobRunId`
   * read run status
 
 The Worker also exports:
@@ -74,7 +74,7 @@ curl -X POST http://127.0.0.1:8787/jobs/fail-always \
 Then check the run:
 
 ```bash
-curl http://127.0.0.1:8787/jobs/<job-id>
+curl http://127.0.0.1:8787/jobs/<kumofire-job-run-id>
 ```
 
 You can also test the scheduled dispatch path locally:

@@ -686,14 +686,14 @@ describe("cloudflare adapters", () => {
 			},
 		});
 
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 		});
 
-		expect(queueMessages).toEqual([{ version: 1, jobRunId: jobId }]);
-		expect(db.getJobRun(jobId)).toMatchObject({
-			id: jobId,
+		expect(queueMessages).toEqual([{ version: 1, kumofireJobRunId }]);
+		expect(db.getJobRun(kumofireJobRunId)).toMatchObject({
+			id: kumofireJobRunId,
 			job_id: "email",
 			job_name: "email",
 			status: "queued",
@@ -705,9 +705,9 @@ describe("cloudflare adapters", () => {
 		}
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "succeeded",
-			jobRunId: jobId,
+			jobRunId: kumofireJobRunId,
 		});
-		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
+		await expect(jobs.getStatus(kumofireJobRunId)).resolves.toMatchObject({
 			status: "succeeded",
 			attempt: 0,
 		});
@@ -762,11 +762,11 @@ describe("cloudflare adapters", () => {
 			},
 		});
 
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 		});
-		db.seedLock(jobId, "2026-03-25T00:10:00.000Z");
+		db.seedLock(kumofireJobRunId, "2026-03-25T00:10:00.000Z");
 
 		const message = queueMessages[0];
 		if (!message) {
@@ -775,9 +775,9 @@ describe("cloudflare adapters", () => {
 
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "ignored",
-			jobRunId: jobId,
+			jobRunId: kumofireJobRunId,
 		});
-		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
+		await expect(jobs.getStatus(kumofireJobRunId)).resolves.toMatchObject({
 			status: "queued",
 			attempt: 0,
 		});
@@ -800,7 +800,7 @@ describe("cloudflare adapters", () => {
 			},
 		});
 
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 		});
@@ -811,11 +811,11 @@ describe("cloudflare adapters", () => {
 
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "succeeded",
-			jobRunId: jobId,
+			jobRunId: kumofireJobRunId,
 		});
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "ignored",
-			jobRunId: jobId,
+			jobRunId: kumofireJobRunId,
 		});
 	});
 
@@ -847,7 +847,7 @@ describe("cloudflare adapters", () => {
 			},
 		});
 
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 		});
@@ -858,9 +858,9 @@ describe("cloudflare adapters", () => {
 
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "retried",
-			jobRunId: jobId,
+			jobRunId: kumofireJobRunId,
 		});
-		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
+		await expect(jobs.getStatus(kumofireJobRunId)).resolves.toMatchObject({
 			status: "scheduled",
 			attempt: 1,
 			lastError: "temporary failure",
@@ -870,8 +870,8 @@ describe("cloudflare adapters", () => {
 		now = new Date("2026-03-25T00:00:15.000Z");
 		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
 		expect(queueMessages).toEqual([
-			{ version: 1, jobRunId: jobId },
-			{ version: 1, jobRunId: jobId },
+			{ version: 1, kumofireJobRunId },
+			{ version: 1, kumofireJobRunId },
 		]);
 	});
 
@@ -910,9 +910,9 @@ describe("cloudflare adapters", () => {
 		now = new Date("2026-03-25T00:05:00.000Z");
 		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
 		expect(queueMessages).toEqual([
-			{ version: 1, jobRunId: expect.any(String) },
+			{ version: 1, kumofireJobRunId: expect.any(String) },
 		]);
-		const firstRunId = queueMessages[0]?.jobRunId;
+		const firstRunId = queueMessages[0]?.kumofireJobRunId;
 		if (!firstRunId) {
 			throw new Error("expected a queue message");
 		}
@@ -1023,7 +1023,7 @@ describe("cloudflare adapters", () => {
 			},
 		});
 
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 		});
@@ -1036,7 +1036,7 @@ describe("cloudflare adapters", () => {
 
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "succeeded",
-			jobRunId: jobId,
+			jobRunId: kumofireJobRunId,
 		});
 	});
 
@@ -1080,7 +1080,7 @@ describe("cloudflare runtime", () => {
 		};
 
 		const jobs = runtime.bind(resources);
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 			runAt: new Date("2026-03-25T00:05:00.000Z"),
@@ -1091,7 +1091,7 @@ describe("cloudflare runtime", () => {
 		await expect(runtime.dispatchScheduled(resources)).resolves.toEqual({
 			dispatched: 1,
 		});
-		expect(queueMessages).toEqual([{ version: 1, jobRunId: jobId }]);
+		expect(queueMessages).toEqual([{ version: 1, kumofireJobRunId }]);
 	});
 
 	it("dispatches materialized cron schedules through explicit db and queue bindings", async () => {
@@ -1150,14 +1150,14 @@ describe("cloudflare runtime", () => {
 		};
 
 		const jobs = runtime.bind(resources);
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 		});
 
-		expect(queueMessages).toEqual([{ version: 1, jobRunId: jobId }]);
-		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
-			id: jobId,
+		expect(queueMessages).toEqual([{ version: 1, kumofireJobRunId }]);
+		await expect(jobs.getStatus(kumofireJobRunId)).resolves.toMatchObject({
+			id: kumofireJobRunId,
 			status: "queued",
 		});
 	});
@@ -1176,16 +1176,22 @@ describe("cloudflare runtime", () => {
 			queue: createQueueBinding(async () => {}),
 		};
 		const jobs = runtime.bind(resources);
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 		});
 
-		const validMessage = createAckableMessage({ version: 1, jobRunId: jobId });
-		const malformedMessage = createAckableMessage({ version: 2, jobRunId: 1 });
+		const validMessage = createAckableMessage({
+			version: 1,
+			kumofireJobRunId,
+		});
+		const malformedMessage = createAckableMessage({
+			version: 2,
+			kumofireJobRunId: 1,
+		});
 		const retryMessage = createAckableMessage({
 			version: 1,
-			jobRunId: "missing",
+			kumofireJobRunId: "missing",
 		});
 		const brokenResources = {
 			db: {
@@ -1214,7 +1220,7 @@ describe("cloudflare runtime", () => {
 		});
 		const brokenMessage = createAckableMessage({
 			version: 1,
-			jobRunId: jobId,
+			kumofireJobRunId,
 		});
 
 		const result = await runtime.consumeBatch(
@@ -1231,7 +1237,7 @@ describe("cloudflare runtime", () => {
 			acked: 3,
 			retried: 0,
 			results: [
-				{ outcome: "succeeded", jobRunId: jobId },
+				{ outcome: "succeeded", jobRunId: kumofireJobRunId },
 				{ outcome: "ignored", jobRunId: "missing" },
 			],
 		});

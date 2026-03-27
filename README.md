@@ -32,6 +32,13 @@ Kumofire Jobs centralizes that lifecycle into one reusable module so projects ca
 * dispatch and consume behavior
 * retry, locking, and status semantics
 
+The integration boundary is intentionally narrow:
+
+* Kumofire queue messages expose only `kumofireJobRunId`
+* your application should persist only `kumofire_job_run_id`
+* your application should fetch job status through the Kumofire API
+* your application should not directly query Kumofire internal tables with SQL
+
 ## How It Works On Cloudflare
 
 This library is queue-based.
@@ -149,12 +156,12 @@ export default {
 
     if (new URL(request.url).pathname === "/jobs/email" && request.method === "POST") {
       const payload = await request.json();
-      const { jobId } = await jobs.create({
+      const { kumofireJobRunId } = await jobs.create({
         name: "email",
         payload,
       });
 
-      return Response.json({ jobId }, { status: 202 });
+      return Response.json({ kumofire_job_run_id: kumofireJobRunId }, { status: 202 });
     }
 
     return new Response("Not found", { status: 404 });
@@ -179,6 +186,11 @@ await jobs.create({
   runAt: new Date("2026-03-27T01:00:00.000Z"),
 });
 ```
+
+`jobs.create(...)` returns `kumofireJobRunId`.
+On the application side, store it as `kumofire_job_run_id`.
+When your application needs job status such as `scheduled`, `running`, `succeeded`, or `failed`, fetch it through the Kumofire API using `kumofire_job_run_id`.
+Do not directly run SQL against Kumofire tables from your application code.
 
 Create a cron-based recurring job:
 

@@ -213,7 +213,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 	return {
 		async create<TPayload extends JsonValue>(
 			input: CreateJobInput<TPayload>,
-		): Promise<{ jobId: string }> {
+		): Promise<{ kumofireJobRunId: string }> {
 			await ensureSchemaVersion();
 			await ensureDefinitions();
 
@@ -223,7 +223,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 				);
 
 				if (existingJob) {
-					return { jobId: requireJobRunId(existingJob) };
+					return { kumofireJobRunId: requireJobRunId(existingJob) };
 				}
 			}
 
@@ -255,12 +255,12 @@ export function createJobs<THandlers extends JobHandlerMap>(
 				if (queuedJob) {
 					await options.queue.send({
 						version: jobMessageVersion,
-						jobRunId: storedJobRun.id,
+						kumofireJobRunId: storedJobRun.id,
 					});
 				}
 			}
 
-			return { jobId: storedJobRun.id };
+			return { kumofireJobRunId: storedJobRun.id };
 		},
 
 		async createSchedule<TPayload extends JsonValue>(
@@ -377,7 +377,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 
 					await options.queue.send({
 						version: jobMessageVersion,
-						jobRunId: storedRun.id,
+						kumofireJobRunId: storedRun.id,
 					});
 					dispatched += 1;
 				}
@@ -399,7 +399,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 				}
 				await options.queue.send({
 					version: jobMessageVersion,
-					jobRunId: storedJobRun.id,
+					kumofireJobRunId: storedJobRun.id,
 				});
 				dispatched += 1;
 			}
@@ -416,10 +416,10 @@ export function createJobs<THandlers extends JobHandlerMap>(
 			}
 
 			const now = getNow();
-			const jobRun = await options.storage.getRun(message.jobRunId);
+			const jobRun = await options.storage.getRun(message.kumofireJobRunId);
 
 			if (!jobRun || jobRun.status === "canceled") {
-				return { outcome: "ignored", jobRunId: message.jobRunId };
+				return { outcome: "ignored", jobRunId: message.kumofireJobRunId };
 			}
 			const storedJobRun = requireStoredJobRun(jobRun);
 
@@ -497,11 +497,13 @@ export function createJobs<THandlers extends JobHandlerMap>(
 			}
 		},
 
-		async getStatus(jobId: string): Promise<JobRunStatusView | null> {
+		async getStatus(
+			kumofireJobRunId: string,
+		): Promise<JobRunStatusView | null> {
 			await ensureSchemaVersion();
 			await ensureDefinitions();
 
-			const jobRun = await options.storage.getRun(jobId);
+			const jobRun = await options.storage.getRun(kumofireJobRunId);
 			return jobRun ? toStatusView(requireStoredJobRun(jobRun)) : null;
 		},
 	};
