@@ -6,7 +6,7 @@ import type {
 	JobScheduleType,
 	JsonValue,
 } from "../../protocol";
-import type { D1Database, D1RunResult } from "../index";
+import type { D1Database, D1RunResult } from "../types";
 
 export interface D1DefinitionRow {
 	id: string;

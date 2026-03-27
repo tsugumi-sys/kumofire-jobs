@@ -1,5 +1,5 @@
 import type { JobSchedule } from "../../protocol";
-import type { D1Database } from "../index";
+import type { D1Database } from "../types";
 import {
 	type D1JobScheduleRow,
 	fetchJobScheduleBy,

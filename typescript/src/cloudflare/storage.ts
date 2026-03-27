@@ -1,11 +1,11 @@
 import type { JobRun, JobStorageAdapter } from "../protocol";
-import type { D1Database } from "./index";
 import { createDefinitionRepository } from "./repositories/definitions";
 import { createJobRunRepository } from "./repositories/job-runs";
 import { createJobScheduleRepository } from "./repositories/job-schedules";
 import { createLeaseRepository } from "./repositories/leases";
 import { createSchemaVersionRepository } from "./repositories/schema-version";
 import { requiredSchemaVersion } from "./schema";
+import type { D1Database } from "./types";
 
 export function createD1StorageAdapter(params: {
 	db: D1Database;

@@ -19,5 +19,5 @@ export const schemaMigrations = [
 		version: 2,
 		name: "job_schedules",
 		sql: "CREATE TABLE IF NOT EXISTS kumofire_job_schedules (\n\tid TEXT PRIMARY KEY,\n\tjob_id TEXT NOT NULL,\n\tjob_name TEXT NOT NULL,\n\tschedule_type TEXT NOT NULL,\n\tschedule_expr TEXT NOT NULL,\n\ttimezone TEXT,\n\tnext_run_at TEXT,\n\tlast_scheduled_at TEXT,\n\tenabled INTEGER NOT NULL DEFAULT 1,\n\tpayload TEXT NOT NULL,\n\tmax_attempts INTEGER NOT NULL,\n\tcreated_at TEXT NOT NULL,\n\tupdated_at TEXT NOT NULL,\n\tFOREIGN KEY (job_id) REFERENCES kumofire_job_definitions(id)\n);\n\nCREATE INDEX IF NOT EXISTS kumofire_job_schedules_enabled_next_run_at_idx\n\tON kumofire_job_schedules (enabled, next_run_at);\n\nALTER TABLE kumofire_job_runs\nADD COLUMN job_schedule_id TEXT REFERENCES kumofire_job_schedules(id);\n\nCREATE INDEX IF NOT EXISTS kumofire_job_runs_job_schedule_id_idx\n\tON kumofire_job_runs (job_schedule_id);\n\nINSERT INTO kumofire_schema_version (version, updated_at)\nVALUES (2, '1970-01-01T00:00:00.000Z')\nON CONFLICT(version) DO UPDATE SET\n\tupdated_at = excluded.updated_at;",
-	},
+	}
 ] as const;
