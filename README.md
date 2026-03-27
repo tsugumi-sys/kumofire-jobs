@@ -2,6 +2,8 @@
 
 Kumofire Jobs is a simple queue-based asynchronous job system for Cloudflare Workers.
 
+For AI coding agents and generated code tools, see [docs/agents.md](./docs/agents.md).
+
 It supports:
 
 * one-shot jobs
@@ -192,6 +194,7 @@ await jobs.createSchedule({
 ## See More Details
 
 * [Cloudflare example](https://github.com/tsugumi-sys/kumofire-jobs/tree/main/examples/cloudflare)
+* [Notes for AI coding agents](https://github.com/tsugumi-sys/kumofire-jobs/blob/main/docs/agents.md)
 * [Cloudflare migration guide](https://github.com/tsugumi-sys/kumofire-jobs/blob/main/docs/cloudflare/migration.md)
 * [Cloudflare runtime guide](https://github.com/tsugumi-sys/kumofire-jobs/blob/main/docs/cloudflare/README.md)
 * [TypeScript package](https://github.com/tsugumi-sys/kumofire-jobs/tree/main/typescript)
