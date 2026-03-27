@@ -25,7 +25,7 @@ Important exported types:
 
 * `JobRunMessage`
   * queue message body shape
-  * current shape: `{ version: 1, jobRunId: string }`
+  * current shape: `{ version: 1, kumofireJobRunId: string }`
   * do not expand it with `jobId`, payload, or other internal fields for application convenience
 * `CloudflareRuntimeResources`
   * current shape: `{ db: D1Database, queue: CloudflareQueue<JobRunMessage> }`
@@ -71,7 +71,7 @@ const runtime = createCloudflareRuntime({
   handlers: {
     email: async ({ job }: CloudflareJobHandlerContext<EmailJobPayload>) => {
       console.log("processing email job", {
-        jobRunId: job.id,
+        kumofireJobRunId: job.id,
         to: job.payload.to,
         subject: job.payload.subject,
       });
@@ -92,7 +92,7 @@ export default {
 
     if (new URL(request.url).pathname === "/jobs/email" && request.method === "POST") {
       const payload = await request.json<EmailJobPayload>();
-      const { jobId: kumofireJobRunId } = await jobs.create({
+      const { kumofireJobRunId } = await jobs.create({
         name: "email",
         payload,
       });
@@ -120,7 +120,7 @@ One-shot job:
 ```ts
 const jobs = runtime.bind(resources(env));
 
-const { jobId: kumofireJobRunId } = await jobs.create({
+const { kumofireJobRunId } = await jobs.create({
   name: "email",
   payload: {
     to: "user@example.com",
@@ -131,7 +131,6 @@ const { jobId: kumofireJobRunId } = await jobs.create({
 ```
 
 Treat `kumofireJobRunId` as the application-side `kumofire_job_run_id`.
-Even though the current return field is named `jobId`, its value is the Job Run ID.
 
 Delayed job:
 
@@ -194,7 +193,7 @@ When generating code against this package:
 * treat older AI-generated snippets as untrusted until checked against this repository
 * do not pass the raw Worker `env` object directly into the runtime
 * do not assume queue messages contain the full job payload
-* do not assume queue messages should expose `jobId`; the queue boundary is `jobRunId` only
+* do not assume queue messages should expose `jobId`; the queue boundary is `kumofireJobRunId` only
 * do not query Kumofire tables directly from application code; fetch status via Kumofire APIs using `kumofire_job_run_id`
 * do not assume recurring jobs are configured by Cloudflare Cron alone; Worker cron drives dispatch, while recurring rules are created with `jobs.createSchedule(...)`
 

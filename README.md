@@ -34,7 +34,7 @@ Kumofire Jobs centralizes that lifecycle into one reusable module so projects ca
 
 The integration boundary is intentionally narrow:
 
-* Kumofire queue messages expose only `jobRunId`
+* Kumofire queue messages expose only `kumofireJobRunId`
 * your application should persist only `kumofire_job_run_id`
 * your application should fetch job status through the Kumofire API
 * your application should not directly query Kumofire internal tables with SQL
@@ -156,7 +156,7 @@ export default {
 
     if (new URL(request.url).pathname === "/jobs/email" && request.method === "POST") {
       const payload = await request.json();
-      const { jobId: kumofireJobRunId } = await jobs.create({
+      const { kumofireJobRunId } = await jobs.create({
         name: "email",
         payload,
       });
@@ -187,8 +187,8 @@ await jobs.create({
 });
 ```
 
-`jobs.create(...)` currently returns a field named `jobId`, but that value is the Job Run ID.
-On the application side, store it only as `kumofire_job_run_id`.
+`jobs.create(...)` returns `kumofireJobRunId`.
+On the application side, store it as `kumofire_job_run_id`.
 When your application needs job status such as `scheduled`, `running`, `succeeded`, or `failed`, fetch it through the Kumofire API using `kumofire_job_run_id`.
 Do not directly run SQL against Kumofire tables from your application code.
 

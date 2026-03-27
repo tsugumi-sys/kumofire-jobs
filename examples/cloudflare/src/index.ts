@@ -43,7 +43,7 @@ const runtime = createCloudflareRuntime({
 			const payload = job.payload as EmailJobPayload;
 
 			console.log("processing email job", {
-				jobRunId: job.id,
+				kumofireJobRunId: job.id,
 				to: payload.to,
 				subject: payload.subject,
 			});
@@ -52,7 +52,7 @@ const runtime = createCloudflareRuntime({
 			const payload = job.payload as AlwaysFailJobPayload;
 
 			console.log("processing fail-always job", {
-				jobRunId: job.id,
+				kumofireJobRunId: job.id,
 				reason: payload.reason ?? "intentional failure",
 			});
 
@@ -82,7 +82,7 @@ const runtime = createCloudflareRuntime({
 				.run();
 
 			console.log("saved example record", {
-				jobRunId: context.job.id,
+				kumofireJobRunId: context.job.id,
 				key: payload.key,
 			});
 		},
@@ -107,39 +107,39 @@ app.get("/", (c) => {
 app.post("/jobs/email", async (c) => {
 	const payload = await c.req.json<EmailJobPayload>();
 	const jobs = runtime.bind(getResources(c.env));
-	const { jobId } = await jobs.create({
+	const { kumofireJobRunId } = await jobs.create({
 		name: "email",
 		payload,
 	});
 
-	return c.json({ jobId }, 202);
+	return c.json({ kumofire_job_run_id: kumofireJobRunId }, 202);
 });
 
 app.post("/jobs/fail-always", async (c) => {
 	const payload = await c.req.json<AlwaysFailJobPayload>();
 	const jobs = runtime.bind(getResources(c.env));
-	const { jobId } = await jobs.create({
+	const { kumofireJobRunId } = await jobs.create({
 		name: "fail-always",
 		payload,
 	});
 
-	return c.json({ jobId }, 202);
+	return c.json({ kumofire_job_run_id: kumofireJobRunId }, 202);
 });
 
 app.post("/jobs/save-record", async (c) => {
 	const payload = await c.req.json<SaveRecordJobPayload>();
 	const jobs = runtime.bind(getResources(c.env));
-	const { jobId } = await jobs.create({
+	const { kumofireJobRunId } = await jobs.create({
 		name: "save-record",
 		payload,
 	});
 
-	return c.json({ jobId }, 202);
+	return c.json({ kumofire_job_run_id: kumofireJobRunId }, 202);
 });
 
-app.get("/jobs/:jobId", async (c) => {
+app.get("/jobs/:kumofireJobRunId", async (c) => {
 	const jobs = runtime.bind(getResources(c.env));
-	const status = await jobs.getStatus(c.req.param("jobId"));
+	const status = await jobs.getStatus(c.req.param("kumofireJobRunId"));
 
 	if (!status) {
 		return c.json({ error: "Job run not found" }, 404);

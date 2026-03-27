@@ -38,7 +38,7 @@ Kumofire Jobs assumes the following runtime components:
 * storage adapter
   * provides the single source of truth for definitions, schedules, and runs
 * queue adapter
-  * delivers `jobRunId`
+  * delivers `kumofireJobRunId`
 
 These components may live in a single Worker or be split across multiple Workers.
 The initial implementation treats Cloudflare D1 and Cloudflare Queues as the first adapters.
@@ -152,11 +152,11 @@ The design does not assume perfect atomicity between run state updates and lock 
 The queue message payload should be minimal.
 
 ```json
-{ "jobRunId": "01J..." }
+{ "kumofireJobRunId": "01J..." }
 ```
 
 The queue must not carry the full payload or job state.
-It should only deliver `jobRunId`, while the source of truth remains in the storage adapter.
+It should only deliver `kumofireJobRunId`, while the source of truth remains in the storage adapter.
 It must not expose `jobId`, payload, schedule metadata, or other internal identifiers.
 
 ## Run Status Model
@@ -239,7 +239,7 @@ Select Job Runs that satisfy:
 * `status = scheduled`
 * `scheduled_for <= now`
 
-Then send each selected `jobRunId` to the queue.
+Then send each selected `kumofireJobRunId` to the queue.
 
 ### 2. Materialize due schedules
 
@@ -267,7 +267,7 @@ This allows one global scheduler trigger to handle:
 For each queue message, `jobs.consume(...)` does the following:
 
 1. validates schema version
-2. reads the Job Run row from `jobRunId`
+2. reads the Job Run row from `kumofireJobRunId`
 3. resolves the Job definition from `job_id`
 4. acquires a Job Lock using a lease
 5. moves the Job Run from `queued` to `running`
@@ -300,7 +300,7 @@ The application owns:
 
 The application boundary is intentionally narrow:
 
-* Kumofire exposes `jobRunId`
+* Kumofire exposes `kumofireJobRunId`
 * the application stores it as `kumofire_job_run_id`
 * the application fetches job status or run details through the Kumofire API using that value
 
@@ -334,7 +334,7 @@ The initial implementation uses a D1 adapter.
 
 The queue adapter is responsible for at least:
 
-* sending `jobRunId` messages
+* sending `kumofireJobRunId` messages
 * receiving messages in a form the consumer can interpret
 
 The initial implementation uses a Cloudflare Queues adapter.

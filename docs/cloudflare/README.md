@@ -70,12 +70,12 @@ export default {
 
     if (new URL(request.url).pathname === "/jobs/email" && request.method === "POST") {
       const payload = await request.json();
-      const { jobId } = await jobs.create({
+      const { kumofireJobRunId } = await jobs.create({
         name: "email",
         payload,
       });
 
-      return Response.json({ jobId }, { status: 202 });
+      return Response.json({ kumofire_job_run_id: kumofireJobRunId }, { status: 202 });
     }
 
     return new Response("Not found", { status: 404 });
@@ -109,7 +109,7 @@ Use `timezone` when you want the cron rule evaluated in a specific time zone.
 Queue messages stay intentionally small:
 
 ```json
-{ "version": 1, "jobRunId": "job_run_1" }
+{ "version": 1, "kumofireJobRunId": "job_run_1" }
 ```
 
 The queue does not carry the full payload.

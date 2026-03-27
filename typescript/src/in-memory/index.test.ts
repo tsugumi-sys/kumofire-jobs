@@ -25,14 +25,20 @@ describe("in-memory adapter", () => {
 			payload: { to: "user@example.com" },
 		});
 
-		expect(queue.messages).toEqual([{ version: 1, jobRunId: result.jobId }]);
-		await expect(jobs.getStatus(result.jobId)).resolves.toMatchObject({
-			id: result.jobId,
+		expect(queue.messages).toEqual([
+			{ version: 1, kumofireJobRunId: result.kumofireJobRunId },
+		]);
+		await expect(
+			jobs.getStatus(result.kumofireJobRunId),
+		).resolves.toMatchObject({
+			id: result.kumofireJobRunId,
 			status: "queued",
 			attempt: 0,
 		});
-		await expect(storage.getRun(result.jobId)).resolves.toMatchObject({
-			id: result.jobId,
+		await expect(
+			storage.getRun(result.kumofireJobRunId),
+		).resolves.toMatchObject({
+			id: result.kumofireJobRunId,
 			jobId: "email",
 			jobName: "email",
 			status: "queued",
@@ -59,14 +65,20 @@ describe("in-memory adapter", () => {
 		});
 
 		expect(queue.messages).toEqual([]);
-		await expect(jobs.getStatus(result.jobId)).resolves.toMatchObject({
+		await expect(
+			jobs.getStatus(result.kumofireJobRunId),
+		).resolves.toMatchObject({
 			status: "scheduled",
 		});
 
 		now = new Date("2026-03-25T00:05:00.000Z");
 		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
-		expect(queue.messages).toEqual([{ version: 1, jobRunId: result.jobId }]);
-		await expect(jobs.getStatus(result.jobId)).resolves.toMatchObject({
+		expect(queue.messages).toEqual([
+			{ version: 1, kumofireJobRunId: result.kumofireJobRunId },
+		]);
+		await expect(
+			jobs.getStatus(result.kumofireJobRunId),
+		).resolves.toMatchObject({
 			status: "queued",
 		});
 	});
@@ -96,7 +108,9 @@ describe("in-memory adapter", () => {
 
 		now = new Date("2026-03-25T00:05:00.000Z");
 		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
-		expect(queue.messages).toEqual([{ version: 1, jobRunId: "job_run_1" }]);
+		expect(queue.messages).toEqual([
+			{ version: 1, kumofireJobRunId: "job_run_1" },
+		]);
 		await expect(storage.getRun("job_run_1")).resolves.toMatchObject({
 			id: "job_run_1",
 			jobId: "report",
@@ -123,7 +137,7 @@ describe("in-memory adapter", () => {
 			},
 		});
 
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 		});
@@ -135,9 +149,9 @@ describe("in-memory adapter", () => {
 
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "succeeded",
-			jobRunId: jobId,
+			jobRunId: kumofireJobRunId,
 		});
-		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
+		await expect(jobs.getStatus(kumofireJobRunId)).resolves.toMatchObject({
 			status: "succeeded",
 			attempt: 0,
 			lastError: null,
@@ -165,7 +179,7 @@ describe("in-memory adapter", () => {
 			},
 		});
 
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 		});
@@ -177,9 +191,9 @@ describe("in-memory adapter", () => {
 
 		await expect(jobs.consume(message)).resolves.toEqual({
 			outcome: "retried",
-			jobRunId: jobId,
+			jobRunId: kumofireJobRunId,
 		});
-		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
+		await expect(jobs.getStatus(kumofireJobRunId)).resolves.toMatchObject({
 			status: "scheduled",
 			attempt: 1,
 			lastError: "temporary failure",
@@ -189,10 +203,10 @@ describe("in-memory adapter", () => {
 		now = new Date("2026-03-25T00:00:05.000Z");
 		await expect(jobs.dispatch()).resolves.toEqual({ dispatched: 1 });
 		expect(queue.messages).toEqual([
-			{ version: 1, jobRunId: jobId },
-			{ version: 1, jobRunId: jobId },
+			{ version: 1, kumofireJobRunId },
+			{ version: 1, kumofireJobRunId },
 		]);
-		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
+		await expect(jobs.getStatus(kumofireJobRunId)).resolves.toMatchObject({
 			status: "queued",
 			attempt: 1,
 		});
@@ -218,7 +232,7 @@ describe("in-memory adapter", () => {
 			},
 		});
 
-		const { jobId } = await jobs.create({
+		const { kumofireJobRunId } = await jobs.create({
 			name: "email",
 			payload: { to: "user@example.com" },
 		});
@@ -239,9 +253,9 @@ describe("in-memory adapter", () => {
 
 		await expect(jobs.consume(retryMessage)).resolves.toEqual({
 			outcome: "failed",
-			jobRunId: jobId,
+			jobRunId: kumofireJobRunId,
 		});
-		await expect(jobs.getStatus(jobId)).resolves.toMatchObject({
+		await expect(jobs.getStatus(kumofireJobRunId)).resolves.toMatchObject({
 			status: "failed",
 			attempt: 2,
 			lastError: "permanent failure",

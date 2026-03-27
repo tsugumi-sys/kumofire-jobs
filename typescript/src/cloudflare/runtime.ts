@@ -72,7 +72,9 @@ function isJobRunMessage(value: unknown): value is JobRunMessage {
 	}
 
 	const candidate = value as Partial<JobRunMessage>;
-	return candidate.version === 1 && typeof candidate.jobRunId === "string";
+	return (
+		candidate.version === 1 && typeof candidate.kumofireJobRunId === "string"
+	);
 }
 
 export function createCloudflareRuntime<
