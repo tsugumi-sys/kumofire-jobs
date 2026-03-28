@@ -55,6 +55,7 @@ interface StoredJobScheduleRow {
 	id: string;
 	job_id: string;
 	job_name: string;
+	schedule_key: string | null;
 	schedule_type: "once" | "interval" | "cron";
 	schedule_expr: string;
 	timezone: string | null;
@@ -198,6 +199,25 @@ class FakeD1Database implements D1Database {
 			}
 
 			return (this.schedules.get(scheduleId) ?? null) as T | null;
+		}
+
+		if (
+			normalized.includes(
+				"FROM kumofire_job_schedules WHERE schedule_key = ? LIMIT 1",
+			)
+		) {
+			const scheduleKey = values[0];
+			if (typeof scheduleKey !== "string") {
+				return null;
+			}
+
+			for (const schedule of this.schedules.values()) {
+				if (schedule.schedule_key === scheduleKey) {
+					return { ...schedule } as T;
+				}
+			}
+
+			return null;
 		}
 
 		if (
@@ -358,6 +378,7 @@ class FakeD1Database implements D1Database {
 				id,
 				jobId,
 				jobName,
+				scheduleKey,
 				scheduleType,
 				scheduleExpr,
 				timezone,
@@ -374,6 +395,7 @@ class FakeD1Database implements D1Database {
 				id: String(id),
 				job_id: String(jobId),
 				job_name: String(jobName),
+				schedule_key: asNullableString(scheduleKey),
 				schedule_type: scheduleType as StoredJobScheduleRow["schedule_type"],
 				schedule_expr: String(scheduleExpr),
 				timezone: asNullableString(timezone),
@@ -385,6 +407,50 @@ class FakeD1Database implements D1Database {
 				created_at: String(createdAt),
 				updated_at: String(updatedAt),
 			});
+
+			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
+		}
+
+		if (
+			normalized.startsWith("UPDATE kumofire_job_schedules SET job_id = ?,")
+		) {
+			const [
+				jobId,
+				jobName,
+				scheduleKey,
+				scheduleType,
+				scheduleExpr,
+				timezone,
+				nextRunAt,
+				lastScheduledAt,
+				enabled,
+				payload,
+				maxAttempts,
+				updatedAt,
+				scheduleId,
+			] = values;
+			const schedule = this.schedules.get(String(scheduleId));
+			if (!schedule) {
+				return {
+					success: true,
+					meta: createD1Meta({ changes: 0 }),
+					results: [],
+				};
+			}
+
+			schedule.job_id = String(jobId);
+			schedule.job_name = String(jobName);
+			schedule.schedule_key = asNullableString(scheduleKey);
+			schedule.schedule_type =
+				scheduleType as StoredJobScheduleRow["schedule_type"];
+			schedule.schedule_expr = String(scheduleExpr);
+			schedule.timezone = asNullableString(timezone);
+			schedule.next_run_at = asNullableString(nextRunAt);
+			schedule.last_scheduled_at = asNullableString(lastScheduledAt);
+			schedule.enabled = Number(enabled);
+			schedule.payload = String(payload);
+			schedule.max_attempts = Number(maxAttempts);
+			schedule.updated_at = String(updatedAt);
 
 			return { success: true, meta: createD1Meta({ changes: 1 }), results: [] };
 		}
@@ -644,6 +710,7 @@ describe("cloudflare adapters", () => {
 		expect(sql).toContain("CREATE TABLE IF NOT EXISTS kumofire_job_schedules");
 		expect(sql).toContain("CREATE TABLE IF NOT EXISTS kumofire_job_locks");
 		expect(sql).toContain("CREATE TABLE IF NOT EXISTS kumofire_schema_version");
+		expect(sql).toContain("ADD COLUMN schedule_key TEXT");
 		expect(sql).toContain("INSERT INTO kumofire_schema_version");
 	});
 
@@ -903,6 +970,7 @@ describe("cloudflare adapters", () => {
 			id: scheduleId,
 			job_id: "report",
 			job_name: "report",
+			schedule_key: null,
 			schedule_type: "cron",
 			schedule_expr: "*/5 * * * *",
 		});
@@ -925,6 +993,67 @@ describe("cloudflare adapters", () => {
 			status: "queued",
 			next_run_at: "2026-03-25T00:05:00.000Z",
 		});
+	});
+
+	it("manages schedules by id and key through the D1 storage adapter", async () => {
+		let now = new Date("2026-03-25T00:00:00.000Z");
+		const db = new FakeD1Database();
+		const jobs = createJobs({
+			storage: createD1StorageAdapter({ db }),
+			queue: createCloudflareQueueAdapter(createQueueBinding(async () => {})),
+			now: () => now,
+			handlers: {
+				report: () => {},
+				digest: () => {},
+			},
+		});
+
+		const scheduleKey = "digest:user:user_123";
+		const { scheduleId } = await jobs.upsertSchedule({
+			scheduleKey,
+			name: "report",
+			payload: { reportId: "weekly" },
+			scheduleType: "cron",
+			scheduleExpr: "*/5 * * * *",
+			timezone: "UTC",
+		});
+
+		await expect(jobs.getSchedule(scheduleId)).resolves.toMatchObject({
+			id: scheduleId,
+			scheduleKey,
+			jobName: "report",
+			scheduleExpr: "*/5 * * * *",
+			timezone: "UTC",
+		});
+		expect(db.getJobSchedule(scheduleId)).toMatchObject({
+			id: scheduleId,
+			schedule_key: scheduleKey,
+		});
+
+		now = new Date("2026-03-25T01:00:00.000Z");
+		await expect(
+			jobs.updateScheduleByKey(scheduleKey, {
+				name: "digest",
+				payload: { userId: "user_123" },
+				scheduleExpr: "0 5 * * *",
+				timezone: "Asia/Tokyo",
+			}),
+		).resolves.toMatchObject({
+			id: scheduleId,
+			jobName: "digest",
+			scheduleExpr: "0 5 * * *",
+			timezone: "Asia/Tokyo",
+			payload: { userId: "user_123" },
+			nextRunAt: "2026-03-25T20:00:00.000Z",
+		});
+
+		await expect(jobs.disableScheduleByKey(scheduleKey)).resolves.toMatchObject(
+			{
+				id: scheduleId,
+				enabled: false,
+				nextRunAt: null,
+			},
+		);
 	});
 
 	it("surfaces malformed stored payload rows from D1", async () => {
@@ -1056,7 +1185,7 @@ describe("cloudflare adapters", () => {
 				payload: { to: "user@example.com" },
 			}),
 		).rejects.toThrow(
-			"Schema version 0 does not satisfy required version 2. Apply Kumofire Jobs migrations.",
+			"Schema version 0 does not satisfy required version 3. Apply Kumofire Jobs migrations.",
 		);
 	});
 });

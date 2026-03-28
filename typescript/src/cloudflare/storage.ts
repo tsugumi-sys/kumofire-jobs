@@ -49,6 +49,18 @@ export function createD1StorageAdapter(params: {
 			return jobScheduleRepository.create(createdSchedule);
 		},
 
+		getSchedule(scheduleId) {
+			return jobScheduleRepository.getById(scheduleId);
+		},
+
+		getScheduleByKey(scheduleKey) {
+			return jobScheduleRepository.getByKey(scheduleKey);
+		},
+
+		updateSchedule(schedule) {
+			return jobScheduleRepository.update(schedule);
+		},
+
 		listDueSchedules({ now, limit }) {
 			return jobScheduleRepository.listDue({ now, limit });
 		},

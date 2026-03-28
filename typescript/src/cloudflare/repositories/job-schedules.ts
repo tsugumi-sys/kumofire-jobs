@@ -17,6 +17,7 @@ export function createJobScheduleRepository(db: D1Database) {
 \tid,
 \tjob_id,
 \tjob_name,
+\tschedule_key,
 \tschedule_type,
 \tschedule_expr,
 \ttimezone,
@@ -32,6 +33,7 @@ export function createJobScheduleRepository(db: D1Database) {
 					schedule.id,
 					schedule.jobId,
 					schedule.jobName,
+					schedule.scheduleKey,
 					schedule.scheduleType,
 					schedule.scheduleExpr,
 					schedule.timezone,
@@ -49,6 +51,55 @@ export function createJobScheduleRepository(db: D1Database) {
 			return schedule;
 		},
 
+		getById(scheduleId: string) {
+			return fetchJobScheduleBy(db, "id = ?", [scheduleId]);
+		},
+
+		getByKey(scheduleKey: string) {
+			return fetchJobScheduleBy(db, "schedule_key = ?", [scheduleKey]);
+		},
+
+		async update(schedule: JobSchedule): Promise<JobSchedule | null> {
+			const result = await db
+				.prepare(`UPDATE kumofire_job_schedules
+SET job_id = ?,
+\tjob_name = ?,
+\tschedule_key = ?,
+\tschedule_type = ?,
+\tschedule_expr = ?,
+\ttimezone = ?,
+\tnext_run_at = ?,
+\tlast_scheduled_at = ?,
+\tenabled = ?,
+\tpayload = ?,
+\tmax_attempts = ?,
+\tupdated_at = ?
+WHERE id = ?`)
+				.bind(
+					schedule.jobId,
+					schedule.jobName,
+					schedule.scheduleKey,
+					schedule.scheduleType,
+					schedule.scheduleExpr,
+					schedule.timezone,
+					schedule.nextRunAt,
+					schedule.lastScheduledAt,
+					schedule.enabled ? 1 : 0,
+					serializePayload(schedule.payload),
+					schedule.maxAttempts,
+					schedule.updatedAt,
+					schedule.id,
+				)
+				.run();
+
+			requireSuccess(result, "update schedule");
+			if (normalizeChanges(result) === 0) {
+				return null;
+			}
+
+			return fetchJobScheduleBy(db, "id = ?", [schedule.id]);
+		},
+
 		async listDue(params: {
 			now: Date;
 			limit: number;
@@ -58,6 +109,7 @@ export function createJobScheduleRepository(db: D1Database) {
 \tid,
 \tjob_id,
 \tjob_name,
+\tschedule_key,
 \tschedule_type,
 \tschedule_expr,
 \ttimezone,

@@ -13,6 +13,7 @@ import type {
 	JobSchedule,
 	JsonValue,
 	RetryPolicy,
+	UpdateJobScheduleInput,
 } from "./protocol";
 
 const DEFAULT_LEASE_MS = 30_000;
@@ -110,6 +111,95 @@ function requireScheduleSupport(
 			"Job schedule support is not available for this storage adapter",
 		);
 	}
+}
+
+function requireScheduleManagementSupport(
+	options: CreateJobsOptions<JobHandlerMap>,
+): asserts options is CreateJobsOptions<JobHandlerMap> & {
+	storage: NonNullable<
+		Pick<
+			CreateJobsOptions<JobHandlerMap>["storage"],
+			"getSchedule" | "getScheduleByKey" | "updateSchedule"
+		>
+	> &
+		CreateJobsOptions<JobHandlerMap>["storage"];
+} {
+	if (
+		!options.storage.getSchedule ||
+		!options.storage.getScheduleByKey ||
+		!options.storage.updateSchedule
+	) {
+		throw new Error(
+			"Job schedule management is not available for this storage adapter",
+		);
+	}
+}
+
+function getScheduleManagementStorage(
+	options: CreateJobsOptions<JobHandlerMap>,
+): {
+	getSchedule: (scheduleId: string) => Promise<JobSchedule | null>;
+	getScheduleByKey: (scheduleKey: string) => Promise<JobSchedule | null>;
+	updateSchedule: (schedule: JobSchedule) => Promise<JobSchedule | null>;
+} {
+	requireScheduleManagementSupport(options);
+	const getSchedule = options.storage.getSchedule;
+	const getScheduleByKey = options.storage.getScheduleByKey;
+	const updateSchedule = options.storage.updateSchedule;
+
+	if (!getSchedule || !getScheduleByKey || !updateSchedule) {
+		throw new Error(
+			"Job schedule management is not available for this storage adapter",
+		);
+	}
+
+	return {
+		getSchedule,
+		getScheduleByKey,
+		updateSchedule,
+	};
+}
+
+function resolveScheduleNextRunAt(params: {
+	now: Date;
+	currentSchedule: JobSchedule;
+	updates: UpdateJobScheduleInput;
+}): string | null {
+	const enabled = params.updates.enabled ?? params.currentSchedule.enabled;
+	if (!enabled) {
+		return null;
+	}
+
+	const scheduleExpr =
+		params.updates.scheduleExpr ?? params.currentSchedule.scheduleExpr;
+	const timezone =
+		params.updates.timezone === undefined
+			? params.currentSchedule.timezone
+			: params.updates.timezone;
+	const scheduleType =
+		params.updates.scheduleType ?? params.currentSchedule.scheduleType;
+
+	if (scheduleType !== "cron") {
+		throw new Error(
+			`Unsupported schedule type "${scheduleType}". Only "cron" is currently implemented.`,
+		);
+	}
+
+	const timingChanged =
+		params.updates.scheduleType !== undefined ||
+		params.updates.scheduleExpr !== undefined ||
+		params.updates.timezone !== undefined;
+	const enabledChanged = params.updates.enabled !== undefined;
+
+	if (timingChanged || enabledChanged) {
+		return getNextCronOccurrence(
+			scheduleExpr,
+			params.now,
+			timezone,
+		).toISOString();
+	}
+
+	return params.currentSchedule.nextRunAt;
 }
 
 function buildDefinitions<THandlers extends JobHandlerMap>(
@@ -295,6 +385,7 @@ export function createJobs<THandlers extends JobHandlerMap>(
 			const schedule = await createSchedule({
 				jobId: definition.id,
 				jobName: definition.name,
+				scheduleKey: input.scheduleKey ?? null,
 				scheduleType: input.scheduleType,
 				scheduleExpr: input.scheduleExpr,
 				timezone: input.timezone ?? null,
@@ -308,6 +399,139 @@ export function createJobs<THandlers extends JobHandlerMap>(
 			});
 
 			return { scheduleId: requireScheduleId(schedule) };
+		},
+
+		async getSchedule(scheduleId: string): Promise<JobSchedule | null> {
+			await ensureSchemaVersion();
+			await ensureDefinitions();
+			const { getSchedule } = getScheduleManagementStorage(options);
+
+			return getSchedule(scheduleId);
+		},
+
+		async getScheduleByKey(scheduleKey: string): Promise<JobSchedule | null> {
+			await ensureSchemaVersion();
+			await ensureDefinitions();
+			const { getScheduleByKey } = getScheduleManagementStorage(options);
+
+			return getScheduleByKey(scheduleKey);
+		},
+
+		async updateSchedule<TPayload extends JsonValue>(
+			scheduleId: string,
+			input: UpdateJobScheduleInput<TPayload>,
+		): Promise<JobSchedule | null> {
+			await ensureSchemaVersion();
+			await ensureDefinitions();
+			const { getSchedule, updateSchedule } =
+				getScheduleManagementStorage(options);
+
+			const existingSchedule = await getSchedule(scheduleId);
+			if (!existingSchedule) {
+				return null;
+			}
+
+			const scheduleType = input.scheduleType ?? existingSchedule.scheduleType;
+			if (scheduleType !== "cron") {
+				throw new Error(
+					`Unsupported schedule type "${scheduleType}". Only "cron" is currently implemented.`,
+				);
+			}
+
+			const now = getNow();
+			const definition =
+				input.name === undefined
+					? null
+					: await resolveDefinitionByName(input.name);
+
+			return updateSchedule({
+				...existingSchedule,
+				jobId: definition?.id ?? existingSchedule.jobId,
+				jobName: definition?.name ?? existingSchedule.jobName,
+				scheduleType,
+				scheduleExpr: input.scheduleExpr ?? existingSchedule.scheduleExpr,
+				timezone:
+					input.timezone === undefined
+						? existingSchedule.timezone
+						: input.timezone,
+				nextRunAt: resolveScheduleNextRunAt({
+					now,
+					currentSchedule: existingSchedule,
+					updates: input,
+				}),
+				enabled: input.enabled ?? existingSchedule.enabled,
+				payload: input.payload ?? existingSchedule.payload,
+				maxAttempts: input.maxAttempts ?? existingSchedule.maxAttempts,
+				updatedAt: now.toISOString(),
+			});
+		},
+
+		async updateScheduleByKey<TPayload extends JsonValue>(
+			scheduleKey: string,
+			input: UpdateJobScheduleInput<TPayload>,
+		): Promise<JobSchedule | null> {
+			await ensureSchemaVersion();
+			await ensureDefinitions();
+			const { getScheduleByKey } = getScheduleManagementStorage(options);
+
+			const existingSchedule = await getScheduleByKey(scheduleKey);
+			if (!existingSchedule) {
+				return null;
+			}
+
+			return this.updateSchedule(existingSchedule.id, input);
+		},
+
+		async upsertSchedule<TPayload extends JsonValue>(
+			input: CreateJobScheduleInput<TPayload> & { scheduleKey: string },
+		): Promise<{ scheduleId: string }> {
+			await ensureSchemaVersion();
+			await ensureDefinitions();
+			const { getScheduleByKey } = getScheduleManagementStorage(options);
+
+			const existingSchedule = await getScheduleByKey(input.scheduleKey);
+			if (existingSchedule) {
+				const updateInput: UpdateJobScheduleInput<TPayload> = {
+					name: input.name,
+					payload: input.payload,
+					scheduleType: input.scheduleType,
+					scheduleExpr: input.scheduleExpr,
+				};
+				if (input.timezone !== undefined) {
+					updateInput.timezone = input.timezone;
+				}
+				if (input.maxAttempts !== undefined) {
+					updateInput.maxAttempts = input.maxAttempts;
+				}
+				if (input.enabled !== undefined) {
+					updateInput.enabled = input.enabled;
+				}
+
+				const updatedSchedule = await this.updateSchedule(
+					existingSchedule.id,
+					updateInput,
+				);
+
+				if (!updatedSchedule) {
+					throw new Error(
+						`Failed to update schedule for key "${input.scheduleKey}"`,
+					);
+				}
+
+				return { scheduleId: updatedSchedule.id };
+			}
+
+			return this.createSchedule(input);
+		},
+
+		async disableSchedule(scheduleId: string): Promise<JobSchedule | null> {
+			return this.updateSchedule(scheduleId, { enabled: false });
+		},
+
+		async disableScheduleByKey(
+			scheduleKey: string,
+		): Promise<JobSchedule | null> {
+			return this.updateScheduleByKey(scheduleKey, { enabled: false });
 		},
 
 		async dispatch(input?: { limit?: number }): Promise<DispatchResult> {
