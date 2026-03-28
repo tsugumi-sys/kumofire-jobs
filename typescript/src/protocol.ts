@@ -28,6 +28,7 @@ export interface JobSchedule {
 	id: string;
 	jobId: string;
 	jobName: string;
+	scheduleKey: string | null;
 	scheduleType: JobScheduleType;
 	scheduleExpr: string;
 	timezone: string | null;
@@ -88,8 +89,21 @@ export interface CreateJobScheduleInput<
 > {
 	name: string;
 	payload: TPayload;
+	scheduleKey?: string;
 	scheduleType: JobScheduleType;
 	scheduleExpr: string;
+	timezone?: string | null;
+	maxAttempts?: number;
+	enabled?: boolean;
+}
+
+export interface UpdateJobScheduleInput<
+	TPayload extends JsonValue = JsonValue,
+> {
+	name?: string;
+	payload?: TPayload;
+	scheduleType?: JobScheduleType;
+	scheduleExpr?: string;
 	timezone?: string | null;
 	maxAttempts?: number;
 	enabled?: boolean;
@@ -123,6 +137,9 @@ export interface JobStorageAdapter {
 	getDefinition?(jobId: string): Promise<JobDefinition | null>;
 	getDefinitionByName?(jobName: string): Promise<JobDefinition | null>;
 	createSchedule?(schedule: Omit<JobSchedule, "id">): Promise<JobSchedule>;
+	getSchedule?(scheduleId: string): Promise<JobSchedule | null>;
+	getScheduleByKey?(scheduleKey: string): Promise<JobSchedule | null>;
+	updateSchedule?(schedule: JobSchedule): Promise<JobSchedule | null>;
 	listDueSchedules?(params: {
 		now: Date;
 		limit: number;

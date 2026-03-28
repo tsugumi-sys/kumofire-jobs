@@ -1,1 +1,1 @@
-export const cloudflareSqliteSchemaVersion = 2;
+export const cloudflareSqliteSchemaVersion = 3;

@@ -50,4 +50,5 @@ export type {
 	JsonPrimitive,
 	JsonValue,
 	RetryPolicy,
+	UpdateJobScheduleInput,
 } from "./protocol";

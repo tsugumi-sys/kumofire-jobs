@@ -20,6 +20,7 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 	const definitions = new Map<string, JobDefinition>();
 	const definitionsByName = new Map<string, string>();
 	const schedules = new Map<string, StoredJobSchedule>();
+	const schedulesByKey = new Map<string, string>();
 	const jobRuns = new Map<string, StoredJobRun>();
 	const dedupeIndex = new Map<string, string>();
 	const locks = new Map<string, { leaseUntil: number }>();
@@ -49,6 +50,9 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 
 		async seedSchedule(schedule) {
 			schedules.set(schedule.id, { ...schedule });
+			if (schedule.scheduleKey) {
+				schedulesByKey.set(schedule.scheduleKey, schedule.id);
+			}
 		},
 
 		async createDefinition(definition) {
@@ -81,13 +85,75 @@ export function createInMemoryStorageAdapter(): InMemoryStorageAdapter {
 		},
 
 		async createSchedule(schedule) {
+			if (schedule.scheduleKey) {
+				const existingId = schedulesByKey.get(schedule.scheduleKey);
+				if (existingId) {
+					const existingSchedule = schedules.get(existingId);
+					if (existingSchedule) {
+						return { ...existingSchedule };
+					}
+				}
+			}
+
 			const createdSchedule: StoredJobSchedule = {
 				...schedule,
 				id: generateScheduleId(),
 			};
 
 			schedules.set(createdSchedule.id, createdSchedule);
+			if (createdSchedule.scheduleKey) {
+				schedulesByKey.set(createdSchedule.scheduleKey, createdSchedule.id);
+			}
 			return { ...createdSchedule };
+		},
+
+		async getSchedule(scheduleId) {
+			const schedule = schedules.get(scheduleId);
+			return schedule ? { ...schedule } : null;
+		},
+
+		async getScheduleByKey(scheduleKey) {
+			const scheduleId = schedulesByKey.get(scheduleKey);
+			if (!scheduleId) {
+				return null;
+			}
+
+			const schedule = schedules.get(scheduleId);
+			return schedule ? { ...schedule } : null;
+		},
+
+		async updateSchedule(schedule) {
+			const existingSchedule = schedules.get(schedule.id);
+			if (!existingSchedule) {
+				return null;
+			}
+
+			if (
+				schedule.scheduleKey &&
+				schedule.scheduleKey !== existingSchedule.scheduleKey
+			) {
+				const conflictingId = schedulesByKey.get(schedule.scheduleKey);
+				if (conflictingId && conflictingId !== schedule.id) {
+					const conflictingSchedule = schedules.get(conflictingId);
+					if (conflictingSchedule) {
+						return { ...conflictingSchedule };
+					}
+				}
+			}
+
+			if (
+				existingSchedule.scheduleKey &&
+				existingSchedule.scheduleKey !== schedule.scheduleKey
+			) {
+				schedulesByKey.delete(existingSchedule.scheduleKey);
+			}
+			if (schedule.scheduleKey) {
+				schedulesByKey.set(schedule.scheduleKey, schedule.id);
+			}
+
+			const updatedSchedule: StoredJobSchedule = { ...schedule };
+			schedules.set(updatedSchedule.id, updatedSchedule);
+			return { ...updatedSchedule };
 		},
 
 		async listDueSchedules({ now, limit }) {

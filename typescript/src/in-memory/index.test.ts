@@ -121,6 +121,90 @@ describe("in-memory adapter", () => {
 		});
 	});
 
+	it("manages schedules by id and key", async () => {
+		let now = new Date("2026-03-25T00:00:00.000Z");
+		const storage = createInMemoryStorageAdapter();
+		const queue = createInMemoryQueueAdapter();
+		const jobs = createJobs({
+			storage,
+			queue,
+			now: () => now,
+			handlers: {
+				report: () => {},
+				digest: () => {},
+			},
+		});
+
+		const scheduleKey = "digest:user:user_123";
+		const { scheduleId } = await jobs.upsertSchedule({
+			scheduleKey,
+			name: "report",
+			payload: { reportId: "weekly" },
+			scheduleType: "cron",
+			scheduleExpr: "*/5 * * * *",
+			timezone: "UTC",
+			enabled: true,
+		});
+
+		await expect(jobs.getSchedule(scheduleId)).resolves.toMatchObject({
+			id: scheduleId,
+			scheduleKey,
+			jobName: "report",
+			scheduleExpr: "*/5 * * * *",
+			timezone: "UTC",
+			enabled: true,
+		});
+		await expect(jobs.getScheduleByKey(scheduleKey)).resolves.toMatchObject({
+			id: scheduleId,
+			scheduleKey,
+		});
+
+		now = new Date("2026-03-25T01:00:00.000Z");
+		await expect(
+			jobs.updateScheduleByKey(scheduleKey, {
+				name: "digest",
+				payload: { userId: "user_123" },
+				scheduleExpr: "0 5 * * *",
+				timezone: "Asia/Tokyo",
+			}),
+		).resolves.toMatchObject({
+			id: scheduleId,
+			jobName: "digest",
+			scheduleExpr: "0 5 * * *",
+			timezone: "Asia/Tokyo",
+			payload: { userId: "user_123" },
+			nextRunAt: "2026-03-25T20:00:00.000Z",
+		});
+
+		await expect(jobs.disableSchedule(scheduleId)).resolves.toMatchObject({
+			id: scheduleId,
+			enabled: false,
+			nextRunAt: null,
+		});
+
+		now = new Date("2026-03-26T00:00:00.000Z");
+		await expect(
+			jobs.upsertSchedule({
+				scheduleKey,
+				name: "digest",
+				payload: { userId: "user_123" },
+				scheduleType: "cron",
+				scheduleExpr: "30 6 * * *",
+				timezone: "Asia/Tokyo",
+				enabled: true,
+			}),
+		).resolves.toEqual({ scheduleId });
+
+		await expect(jobs.getSchedule(scheduleId)).resolves.toMatchObject({
+			id: scheduleId,
+			jobName: "digest",
+			scheduleExpr: "30 6 * * *",
+			timezone: "Asia/Tokyo",
+			enabled: true,
+			nextRunAt: "2026-03-26T21:30:00.000Z",
+		});
+	});
+
 	it("marks a job as succeeded after the handler completes", async () => {
 		const now = new Date("2026-03-25T00:00:00.000Z");
 		const storage = createInMemoryStorageAdapter();

@@ -40,6 +40,7 @@ export interface D1JobScheduleRow {
 	id: string;
 	job_id: string;
 	job_name: string;
+	schedule_key: string | null;
 	schedule_type: JobScheduleType;
 	schedule_expr: string;
 	timezone: string | null;
@@ -105,6 +106,7 @@ export function mapJobScheduleRow(row: D1JobScheduleRow): JobSchedule {
 		id: row.id,
 		jobId: row.job_id,
 		jobName: row.job_name,
+		scheduleKey: row.schedule_key,
 		scheduleType: row.schedule_type,
 		scheduleExpr: row.schedule_expr,
 		timezone: row.timezone,
@@ -188,6 +190,7 @@ export async function fetchJobScheduleBy(
 \tid,
 \tjob_id,
 \tjob_name,
+\tschedule_key,
 \tschedule_type,
 \tschedule_expr,
 \ttimezone,
