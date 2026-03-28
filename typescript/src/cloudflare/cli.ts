@@ -320,8 +320,6 @@ function createConfirmationMessage(
 	const location = options.target === "local" ? "local" : "remote";
 	const lines = [
 		`About to apply ${commands.length} Kumofire Jobs migration${commands.length === 1 ? "" : "s"} to the ${location} D1 database "${options.database}".`,
-		"Command:",
-		...commands,
 		"Continue? [y/N]",
 	];
 

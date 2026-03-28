@@ -14,12 +14,14 @@ function createDependencies(params?: {
 	const executions: CommandExecution[] = [];
 	const logs: string[] = [];
 	const errors: string[] = [];
+	const confirmations: string[] = [];
 	const results = [...(params?.results ?? [])];
 
 	return {
 		executions,
 		logs,
 		errors,
+		confirmations,
 		deps: {
 			async execute(command: CommandExecution): Promise<CommandResult> {
 				executions.push(command);
@@ -29,7 +31,8 @@ function createDependencies(params?: {
 				}
 				return next;
 			},
-			async confirm() {
+			async confirm(message: string) {
+				confirmations.push(message);
 				return params?.confirmed ?? true;
 			},
 			log(message: string) {
@@ -120,7 +123,7 @@ describe("cloudflare cli migrate command", () => {
 	});
 
 	it("prompts and applies pending migrations", async () => {
-		const { deps, executions, logs } = createDependencies({
+		const { deps, executions, logs, confirmations } = createDependencies({
 			results: [
 				{
 					stdout: JSON.stringify({
@@ -183,6 +186,16 @@ describe("cloudflare cli migrate command", () => {
 		expect(logs).toContain("Applying migration 2: job_schedules");
 		expect(logs).toContain("Applying migration 3: schedule_keys");
 		expect(logs).toContain("Done. Schema version is now 3.");
+		expect(
+			logs.filter((line) =>
+				line.startsWith("wrangler d1 execute jobs-db --local"),
+			),
+		).toHaveLength(3);
+		expect(confirmations).toHaveLength(1);
+		expect(confirmations[0]).not.toContain("Command:");
+		expect(confirmations[0]).not.toContain(
+			"wrangler d1 execute jobs-db --local",
+		);
 	});
 
 	it("fails in non-interactive mode without --yes", async () => {
