@@ -28,7 +28,7 @@ export function createJobScheduleRepository(db: D1Database) {
 \tmax_attempts,
 \tcreated_at,
 \tupdated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 				.bind(
 					schedule.id,
 					schedule.jobId,
