@@ -7,8 +7,8 @@ Use these as the source of truth first:
 
 * the top-level README
 * the Cloudflare example in `examples/cloudflare`
-* the Cloudflare runtime guide in `docs/cloudflare/README.md`
-* the migration docs in `docs/cloudflare/migration.md`
+* the Cloudflare runtime guide in `docs/apis/cloudflare.md`
+* the migration commands in the top-level `README.md`
 
 ## Core Interfaces
 
